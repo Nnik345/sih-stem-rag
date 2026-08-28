@@ -1,11 +1,38 @@
 # Python 3.12
 #
 # The curriculum download script uses only the standard library.
-# Generator dependencies for the Qwen3-VL POC are listed below.
+# Versions are pinned to what is actually installed and verified in this
+# environment; nothing here is a guess.
 
+# --- Generator: Qwen3-VL-8B-Instruct (unchanged) --------------------------- #
+# Qwen3-VL support is not in a tagged Transformers release yet, so the Git
+# dependency below is required. Do not replace it with a pinned PyPI version.
 torch==2.13.0
 torchvision==0.28.0
 accelerate==1.14.0
 qwen-vl-utils==0.0.14
 huggingface-hub==1.29.0
 transformers @ git+https://github.com/huggingface/transformers.git
+
+# --- Retrieval: PDF parsing, graph store, embeddings, reranking ------------ #
+# PyMuPDF: structured PDF text/image extraction.
+pymupdf==1.28.2
+# Official Neo4j driver: graph, vector index and full-text index access.
+neo4j==6.3.0
+# Neo4j connection settings are read from .env.
+python-dotenv==1.2.3
+# Batch assembly and vector normalisation for BGE-M3 dense embeddings.
+numpy==2.5.2
+
+# BGE-M3 (embeddings) and BGE-reranker-v2-m3 (reranking) are loaded directly
+# with transformers + tokenizers, which the generator already provides. The
+# FlagEmbedding package is deliberately not used: it pulls in its own model
+# management and would obscure the batching, pooling and normalisation steps
+# that these experiments need to control.
+
+# --- Tests ----------------------------------------------------------------- #
+pytest==9.1.1
+
+# Deliberately absent: LangChain and LlamaIndex. Chunking, retrieval, graph
+# traversal, fusion, reranking and evidence gating are implemented directly so
+# each layer can be modified and benchmarked on its own.

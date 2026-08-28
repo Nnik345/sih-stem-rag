@@ -1,16 +1,52 @@
-# Downloaded curriculum dataset (local research use only)
+# =============================================================================
+# Gitignored paths and how to recreate them are documented in README.md:
+#   First-time local setup
+#   What is gitignored and how to restore it
+# =============================================================================
+
+# --- Curriculum PDFs (reproducible) ------------------------------------------
+# Restore: python scripts/download_core_knowledge_stem.py
 core_knowledge_stem/
 
-# Local model weights (downloaded separately; not committed)
+# --- Model weights (reproducible) --------------------------------------------
+# Restore: python scripts/download_retrieval_models.py
+#          huggingface-cli download Qwen/Qwen3-VL-8B-Instruct --local-dir models/qwen3-vl-8b-instruct
 models/
 
-# Download run logs
-download.log
+# --- Secrets (not reproducible; copy from template) --------------------------
+# Restore: cp .env.example .env
+.env
 
-# Local pyenv configuration
+# --- Ingestion output (reproducible from corpus + Neo4j) ---------------------
+# Restore: python scripts/ingest_corpus.py
+data/processed/
+
+# --- Neo4j + bundled JDK 21 (reproducible; tarball install only) --------------
+# Restore: README.md -> Neo4j setup (download tarballs, then scripts/neo4j_local.sh)
+# Includes extracted Neo4j, bundled Temurin JDK 21, live database files, and tarballs.
+# There is no Docker or system-wide Neo4j install in this project.
+.neo4j-local/
+.neo4j-local/*.tar.gz
+.neo4j-local/*-unix.tar.gz
+
+# --- Evaluation labels (hand-curated; not auto-reproducible) -----------------
+# Schema docs under data/evaluation/ ARE committed. Only your label file is ignored.
+data/evaluation/retrieval_questions.jsonl
+
+# --- Tool and test caches (reproducible) -------------------------------------
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- Logs (reproducible by re-running the command) ---------------------------
+*.log
+
+# --- Local pyenv configuration -----------------------------------------------
 .python-version
 
-# Python
+# --- Python bytecode and packaging -------------------------------------------
 __pycache__/
 *.py[cod]
 *.pyo
@@ -21,12 +57,12 @@ dist/
 build/
 *.egg
 
-# Virtual environments
+# --- Virtual environments ----------------------------------------------------
 .venv/
 venv/
 ENV/
 
-# Editor / OS
+# --- Editor / OS -------------------------------------------------------------
 .DS_Store
 *.swp
 *.swo
