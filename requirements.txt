@@ -1,0 +1,4 @@
+# Python 3.12
+#
+# No third-party packages are required yet. The curriculum download script
+# uses only the standard library. Add project dependencies below as needed.
