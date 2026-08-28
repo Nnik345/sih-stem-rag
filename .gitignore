@@ -1,6 +1,9 @@
 # Downloaded curriculum dataset (local research use only)
 core_knowledge_stem/
 
+# Local model weights (downloaded separately; not committed)
+models/
+
 # Download run logs
 download.log
 

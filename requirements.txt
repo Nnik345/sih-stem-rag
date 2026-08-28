@@ -1,4 +1,11 @@
 # Python 3.12
 #
-# No third-party packages are required yet. The curriculum download script
-# uses only the standard library. Add project dependencies below as needed.
+# The curriculum download script uses only the standard library.
+# Generator dependencies for the Qwen3-VL POC are listed below.
+
+torch==2.13.0
+torchvision==0.28.0
+accelerate==1.14.0
+qwen-vl-utils==0.0.14
+huggingface-hub==1.29.0
+transformers @ git+https://github.com/huggingface/transformers.git
