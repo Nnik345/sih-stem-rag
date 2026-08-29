@@ -11,6 +11,7 @@ produce meaningless numbers.
 | --- | --- |
 | `retrieval_questions.jsonl` | The real evaluation set. Create it yourself; it is not committed. |
 | `retrieval_questions.example.jsonl` | Two illustrative records showing the schema. Not a benchmark. |
+| `reranker_calibration.md` | Raw logit vs sigmoid, selected evidence floor, and reviewed relevant/irrelevant pairs. |
 
 ## Record schema (one JSON object per line)
 
@@ -18,7 +19,7 @@ produce meaningless numbers.
 | --- | --- | --- | --- |
 | `question_id` | string | yes | Stable identifier, unique within the file. |
 | `question` | string | yes | The student question, written as a student would ask it. |
-| `grade` | integer or null | yes | Curriculum grade to filter on (`1`, `2`, `3`), or `null` to search corpus-wide. |
+| `grade` | integer or null | yes | Curriculum grade to filter on (`3`, `4`, `5`), or `null` to search corpus-wide. |
 | `subject` | string or null | yes | `"mathematics"`, `"science"`, or `null`. |
 | `expected_unit` | string or null | no | `unit_id` (or a distinctive substring of the unit title) where the answer should live. Enables unit-level scoring without chunk labels. |
 | `relevant_chunk_ids` | array of strings | no | Chunk IDs judged relevant, from `scripts/test_retriever.py` output. Required for Recall@K / MRR / nDCG. |
@@ -34,8 +35,8 @@ loader.
 1. Run the question through the retriever and copy the candidate chunk IDs:
 
    ```bash
-   python scripts/test_retriever.py --query "why does the moon change shape" \
-       --grade 1 --subject science --json > /tmp/candidates.json
+   python scripts/test_retriever.py --query "what is a unit fraction" \
+       --grade 3 --subject mathematics --json > /tmp/candidates.json
    ```
 
 2. Read the retrieved text and decide which chunks genuinely answer the

@@ -198,6 +198,72 @@ class TestFusion:
         )
         assert fused[0].grade == 1
 
+    def test_support_and_primary_keep_unmodified_rrf_order(self):
+        """Source role must not rewrite fused scores or ranks."""
+        support = dense_hit("utah", 1, score=0.99)
+        support.source_role = "support"
+        primary = dense_hit("siyavula", 2, score=0.51)
+        primary.source_role = "primary"
+        fused = fuse(
+            [ChannelResults(CHANNEL_DENSE, [support, primary], 1.0)],
+            k=60,
+            top_k=10,
+        )
+        assert fused[0].chunk_id == "utah"
+        assert fused[0].rrf_score > fused[1].rrf_score
+
+    def test_prefer_primary_keeps_support_but_lists_it_later(self):
+        from rag.fusion import prefer_primary
+
+        support = dense_hit("utah", 1, score=0.99)
+        support.source_role = "support"
+        primary = dense_hit("siyavula", 2, score=0.51)
+        primary.source_role = "primary"
+        ordered = prefer_primary([support, primary])
+        assert [c.chunk_id for c in ordered] == ["siyavula", "utah"]
+
+    def test_select_final_evidence_prefers_adequate_primary(self):
+        from rag.fusion import select_final_evidence
+
+        support = dense_hit("utah", 1, score=0.99)
+        support.source_role = "support"
+        support.rerank_score = 2.0
+        primary = dense_hit("siyavula", 2, score=0.51)
+        primary.source_role = "primary"
+        primary.rerank_score = 1.0
+        selected = select_final_evidence(
+            [support, primary], limit=2, min_score=0.0
+        )
+        assert selected[0].chunk_id == "siyavula"
+        assert selected[0].selection_reason == "primary_adequate"
+        assert selected[1].chunk_id == "utah"
+        assert selected[1].selection_reason == "support_fills_gap"
+
+    def test_inadequate_primary_does_not_beat_adequate_support(self):
+        from rag.fusion import select_final_evidence
+
+        primary = dense_hit("siyavula", 1, score=0.2)
+        primary.source_role = "primary"
+        primary.rerank_score = -3.0
+        support = dense_hit("utah", 2, score=0.9)
+        support.source_role = "support"
+        support.rerank_score = 2.5
+        selected = select_final_evidence(
+            [primary, support], limit=1, min_score=0.0
+        )
+        assert selected[0].chunk_id == "utah"
+        assert selected[0].selection_reason == "no_adequate_primary"
+
+    def test_support_selected_when_primary_missing(self):
+        from rag.fusion import select_final_evidence
+
+        support = dense_hit("utah", 1, score=0.9)
+        support.source_role = "support"
+        support.rerank_score = 1.2
+        selected = select_final_evidence([support], limit=1, min_score=0.0)
+        assert selected[0].chunk_id == "utah"
+        assert selected[0].selection_reason == "no_adequate_primary"
+
     def test_empty_channels_produce_empty_result(self):
         assert fuse([], k=60, top_k=5) == []
         assert (

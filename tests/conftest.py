@@ -64,21 +64,27 @@ def metadata(tmp_path: Path) -> DocumentMetadata:
     pdf_path = tmp_path / "student_book.pdf"
     pdf_path.write_bytes(b"%PDF-1.7 test")
     return DocumentMetadata(
-        document_id="grade_02:science:unit_01_matter:student:student_book",
+        document_id="grade_03:science:unit_01_matter:student:student_book",
         document_title="Matter - Student Book",
         local_pdf_path=pdf_path,
-        relative_pdf_path="grade_02/science/unit_01_matter/student/student_book.pdf",
+        relative_pdf_path="raw/utah_oer/science/grade_03/science_oer/student/student_book.pdf",
         filename="student_book.pdf",
-        grade=2,
+        grade=3,
         subject="science",
-        grade_id="grade_02",
-        subject_id="grade_02:science",
-        unit_id="grade_02:science:unit_01_matter",
+        grade_id="grade_03",
+        subject_id="grade_03:science",
+        unit_id="grade_03:science:unit_01_matter",
         unit_slug="unit_01_matter",
         unit_title="Matter",
         unit_number=1,
         resource_type="student_book",
         audience="student",
+        source_id="utah_science_oer",
+        publisher="Utah State Board of Education",
+        source_role="primary",
+        licence="See source notices",
+        content_partition="student_evidence",
+        extract_images=False,
     )
 
 

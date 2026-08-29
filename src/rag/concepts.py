@@ -38,15 +38,14 @@ _SEGMENT_SPLIT_RE = re.compile(
     r"\s*(?:[,;:/|]|\u2013|\u2014|--|\band\b|\bor\b|\bwith\b)\s*", re.IGNORECASE
 )
 _LEADING_ARTICLE_RE = re.compile(r"^(?:the|a|an)\s+", re.IGNORECASE)
-# Publisher/structural prefixes on Core Knowledge unit titles, e.g.
-# "CKMath Grade 1 - Connecting Math to Our World: Math All Around Us".
+# Publisher/structural prefixes on unit titles.
 _TITLE_PREFIX_RE = re.compile(
     r"^\s*(?:ck(?:math|sci|la)\s*)?(?:grade\s*\d+\s*)?(?:unit\s*\d+\s*)?[-\u2013\u2014:]?\s*",
     re.IGNORECASE,
 )
 _STRUCTURAL_RE = re.compile(
     r"^(?:unit|lesson|chapter|activity|session|segment|day|week|page|part|step|"
-    r"appendix|figure|table|grade|core\s+knowledge)\b[\s\d.:-]*$",
+    r"appendix|figure|table|grade)\b[\s\d.:-]*$",
     re.IGNORECASE,
 )
 _HAS_DIGIT_ONLY_RE = re.compile(r"^[\W\d_]+$")

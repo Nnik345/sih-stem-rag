@@ -26,10 +26,23 @@ from __future__ import annotations
 from typing import Any, Sequence
 
 from .config import RetrievalConfig
+from .graph_trace import (
+    DEFAULT_TRACE_MAX_NODES,
+    DEFAULT_TRACE_PER_RELATION,
+    classify_graph_trace,
+    collect_diagnostic_rows,
+    primary_records_to_rows,
+)
 from .logging_utils import Timer, get_logger
 from .neo4j_store import Neo4jStore
-from .retrieval_base import build_filter_clause, chunk_from_record, where_clause
+from .retrieval_base import (
+    build_filter_clause,
+    chunk_from_record,
+    chunk_projection,
+    where_clause,
+)
 from .schemas import CHANNEL_GRAPH, RetrievalFilter, RetrievedChunk
+from .trace import TraceObserver, emit
 
 LOGGER = get_logger(__name__)
 
@@ -96,6 +109,7 @@ def _build_query(relations: Sequence[str], filter_clause: str) -> str:
     # CALL (seed) { ... } is the variable-scope form; importing with `WITH seed`
     # inside the subquery is deprecated as of Neo4j 5.23.
     return f"""
+    /* graph-primary */
     UNWIND $seeds AS seed_row
     MATCH (seed:Chunk {{chunk_id: seed_row.chunk_id}})
     CALL (seed) {{
@@ -104,21 +118,7 @@ def _build_query(relations: Sequence[str], filter_clause: str) -> str:
     WITH seed, seed_row, n, relation, via
     {predicate}
     RETURN
-        n.chunk_id        AS chunk_id,
-        n.text            AS text,
-        n.grade           AS grade,
-        n.subject         AS subject,
-        n.unit_id         AS unit_id,
-        n.unit_title      AS unit_title,
-        n.document_id     AS document_id,
-        n.document_title  AS document_title,
-        n.section_id      AS section_id,
-        n.section_title   AS section_title,
-        n.page_start      AS page_start,
-        n.page_end        AS page_end,
-        n.resource_type   AS resource_type,
-        n.audience        AS audience,
-        n.local_pdf_path  AS local_pdf_path,
+        {chunk_projection("n")},
         relation          AS relation,
         via               AS via,
         seed.chunk_id     AS seed_chunk_id,
@@ -143,6 +143,9 @@ class GraphRetriever:
         self.max_concept_mentions = max_concept_mentions
         self.last_timing_ms: float = 0.0
         self.last_seeds: list[str] = []
+        self.last_trace: dict[str, Any] | None = None
+        self.trace_per_relation_limit = DEFAULT_TRACE_PER_RELATION
+        self.trace_max_nodes = DEFAULT_TRACE_MAX_NODES
 
     def active_relations(self, max_depth: int | None = None) -> list[str]:
         depth = max_depth if max_depth is not None else self.config.graph_max_depth
@@ -178,24 +181,45 @@ class GraphRetriever:
         scope: RetrievalFilter | None = None,
         top_k: int | None = None,
         max_depth: int | None = None,
+        observer: TraceObserver | None = None,
     ) -> list[RetrievedChunk]:
         """Expand from ``seeds`` and return the best new candidates."""
         scope = scope or RetrievalFilter()
         limit = top_k or self.config.graph_top_k
         timer = Timer()
         self.last_seeds = [seed["chunk_id"] for seed in seeds]
+        self.last_trace = None
 
         if not seeds:
             LOGGER.info("Graph expansion skipped: no seed chunks")
             self.last_timing_ms = timer.stop() * 1000
+            self._emit_graph_trace(
+                observer,
+                seeds=[],
+                scope=scope,
+                selected=[],
+                primary_records=[],
+                enabled=[],
+                disabled=list(RELATION_DEPTH),
+            )
             return []
 
         relations = self.active_relations(max_depth)
+        disabled = [name for name in RELATION_DEPTH if name not in relations]
         if not relations:
             LOGGER.warning(
                 "No graph relations enabled at depth %s", max_depth
             )
             self.last_timing_ms = timer.stop() * 1000
+            self._emit_graph_trace(
+                observer,
+                seeds=list(seeds),
+                scope=scope,
+                selected=[],
+                primary_records=[],
+                enabled=[],
+                disabled=disabled,
+            )
             return []
 
         filter_clause, filter_params = build_filter_clause(scope, "n")
@@ -255,6 +279,16 @@ class GraphRetriever:
             ", ".join(relations),
             self.last_timing_ms,
         )
+        self._emit_graph_trace(
+            observer,
+            seeds=list(seeds),
+            scope=scope,
+            selected=ordered,
+            primary_records=records,
+            enabled=relations,
+            disabled=disabled,
+            graph_top_k=limit,
+        )
         return ordered
 
     def retrieve(
@@ -265,12 +299,82 @@ class GraphRetriever:
         top_k: int | None = None,
         seed_top_k: int | None = None,
         max_depth: int | None = None,
+        observer: TraceObserver | None = None,
     ) -> list[RetrievedChunk]:
         """Select seeds from other channels, then expand."""
         seeds = self.select_seeds(
             channels, seed_top_k or self.config.graph_seed_top_k
         )
-        return self.expand(seeds, scope=scope, top_k=top_k, max_depth=max_depth)
+        return self.expand(
+            seeds,
+            scope=scope,
+            top_k=top_k,
+            max_depth=max_depth,
+            observer=observer,
+        )
+
+    def _emit_graph_trace(
+        self,
+        observer: TraceObserver | None,
+        *,
+        seeds: Sequence[dict[str, Any]],
+        scope: RetrievalFilter,
+        selected: Sequence[RetrievedChunk],
+        primary_records: Sequence[dict[str, Any]],
+        enabled: Sequence[str],
+        disabled: Sequence[str],
+        graph_top_k: int | None = None,
+    ) -> None:
+        if observer is None:
+            self.last_trace = None
+            return
+        diagnostic_rows, hubs, caps = collect_diagnostic_rows(
+            self.store,
+            seeds=seeds,
+            enabled_relations=enabled,
+            max_concept_mentions=self.max_concept_mentions,
+            trace_per_relation=self.trace_per_relation_limit,
+        )
+        trace = classify_graph_trace(
+            seeds=seeds,
+            scope=scope,
+            selected=selected,
+            primary_rows=primary_records_to_rows(primary_records, seeds),
+            diagnostic_rows=diagnostic_rows,
+            hub_concepts=hubs,
+            enabled_relations=list(enabled),
+            disabled_relations=list(disabled),
+            per_relation_limit=self.per_relation_limit,
+            graph_top_k=graph_top_k or self.config.graph_top_k,
+            max_concept_mentions=self.max_concept_mentions,
+            max_paths_per_seed_relation=self.trace_per_relation_limit,
+            max_nodes=self.trace_max_nodes,
+        )
+        if caps:
+            trace.truncated = True
+            for cap in caps:
+                if cap not in trace.truncation_caps:
+                    trace.truncation_caps.append(cap)
+            trace.truncation_warning = (
+                "Graph trace was truncated by a safety cap "
+                f"({', '.join(trace.truncation_caps)}). Neighbours beyond the cap "
+                "were not examined and are not shown as ignored."
+            )
+        if len(trace.nodes) >= self.trace_max_nodes:
+            trace.truncated = True
+            if "max_nodes" not in trace.truncation_caps:
+                trace.truncation_caps.append("max_nodes")
+        self.last_trace = trace.to_dict()
+        emit(
+            observer,
+            "graph_completed",
+            graph=trace,
+            elapsed_ms=self.last_timing_ms,
+            summary=(
+                f"{len(selected)} selected, "
+                f"{trace.counters.get('ignored_candidates', 0)} ignored"
+            ),
+        )
 
     # -- neighbourhood inspection ------------------------------------------ #
 
@@ -299,7 +403,11 @@ class GraphRetriever:
                      source_pdf: i.source_pdf,
                      width: i.width,
                      height: i.height,
-                     format: i.format
+                     format: i.format,
+                     licence: i.licence,
+                     licence_url: i.licence_url,
+                     attribution: i.attribution,
+                     creator: i.creator
                    })[0..$limit_per_chunk] AS images
             """,
             {"chunk_ids": list(chunk_ids), "limit_per_chunk": int(limit_per_chunk)},

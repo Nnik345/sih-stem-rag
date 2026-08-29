@@ -6,9 +6,9 @@ candidate's per-channel ranks, RRF score and reranker score, so retrieval
 behaviour can be understood and compared between configurations.
 
     python scripts/test_retriever.py                         # interactive
-    python scripts/test_retriever.py -q "why do plants need sunlight" -g 3 -s science
-    python scripts/test_retriever.py -q "measuring length" --no-rerank
-    python scripts/test_retriever.py -q "moon phases" -g 1 -s science --json out.json
+    python scripts/test_retriever.py -q "what is a unit fraction" -g 3 -s mathematics
+    python scripts/test_retriever.py -q "how does weather change" -g 3 -s science --no-rerank
+    python scripts/test_retriever.py -q "what is a unit fraction" -g 3 -s mathematics --json out.json
 """
 
 from __future__ import annotations
@@ -74,6 +74,17 @@ def print_channel(title: str, results: list[RetrievedChunk], *, limit: int) -> N
             f"rerank={_fmt(chunk.rerank_score, '8.4f')} "
             f"rerank_rank={_rank(chunk.rerank_rank)}"
         )
+        print(
+            f"       source={chunk.source_id or '?'} "
+            f"role={chunk.source_role or '?'} "
+            f"licence={(chunk.licence or '?')[:40]} "
+            f"partition={chunk.content_partition or '?'}"
+        )
+        outcomes = ", ".join(chunk.cisce_outcome_ids) or "(none)"
+        print(
+            f"       cisce={outcomes} "
+            f"alignment={chunk.alignment_status or '?'}"
+        )
         if chunk.graph_expansion_path:
             print(f"       graph path: {chunk.graph_expansion_path[:PREVIEW_WIDTH]}")
         print(f"       text: {chunk.preview(PREVIEW_WIDTH)}")
@@ -127,7 +138,7 @@ def print_report(response: RetrievalResponse, *, limit: int) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-q", "--query", help="Student question. Omit to be prompted.")
-    parser.add_argument("-g", "--grade", type=int, help="Grade filter, e.g. 2")
+    parser.add_argument("-g", "--grade", type=int, help="Grade filter, e.g. 3")
     parser.add_argument("-s", "--subject", help="Subject filter: science | mathematics")
     parser.add_argument("-u", "--unit", help="Unit id filter")
     parser.add_argument("--resource-type", help="Resource type filter")

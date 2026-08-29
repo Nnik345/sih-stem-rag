@@ -21,7 +21,7 @@ from rag.retrieval_base import build_filter_clause
 
 # A question with obvious lexical anchors, so both the dense and the full-text
 # channel should find something.
-QUERY = "why does the moon look different on different nights"
+QUERY = "what is a unit fraction on a number line"
 
 
 @pytest.fixture(scope="module")
@@ -67,12 +67,30 @@ def retriever(config, store, ingested):
 
 
 class TestGraphContents:
-    def test_all_three_grades_present(self, store, ingested):
+    def test_grades_three_to_five_present(self, store, ingested):
         grades = {
             row["grade"]
             for row in store.read("MATCH (g:Grade) RETURN g.grade AS grade")
         }
-        assert {1, 2, 3} <= grades
+        assert {3, 4, 5} <= grades
+        assert not ({1, 2} & grades)
+
+    def test_no_core_knowledge_nodes(self, store, ingested):
+        leftover = store.read(
+            """
+            MATCH (n)
+            WHERE toLower(coalesce(n.local_pdf_path, '')) CONTAINS 'core_knowledge'
+               OR toLower(coalesce(n.publisher, '')) CONTAINS 'core knowledge'
+            RETURN count(n) AS n
+            """
+        )[0]["n"]
+        assert leftover == 0
+
+    def test_no_evaluation_only_chunks(self, store, ingested):
+        count = store.read(
+            "MATCH (c:Chunk {content_partition: 'evaluation_only'}) RETURN count(c) AS n"
+        )[0]["n"]
+        assert count == 0
 
     def test_both_subjects_present(self, store, ingested):
         subjects = {
@@ -124,7 +142,7 @@ class TestGraphContents:
 
 class TestChannels:
     def test_dense_channel_returns_results(self, retriever):
-        results = retriever.dense.retrieve(QUERY, scope=RetrievalFilter(grade=1))
+        results = retriever.dense.retrieve(QUERY, scope=RetrievalFilter(grade=3))
         assert results
         for chunk in results:
             assert chunk.dense_rank is not None
@@ -132,22 +150,22 @@ class TestChannels:
             assert CHANNEL_DENSE in chunk.retrieval_sources
 
     def test_dense_ranks_are_contiguous_and_ordered(self, retriever):
-        results = retriever.dense.retrieve(QUERY, scope=RetrievalFilter(grade=1))
+        results = retriever.dense.retrieve(QUERY, scope=RetrievalFilter(grade=3))
         assert [c.dense_rank for c in results] == list(range(1, len(results) + 1))
         scores = [c.dense_score for c in results]
         assert scores == sorted(scores, reverse=True)
 
     def test_fulltext_channel_finds_exact_terminology(self, retriever):
-        results = retriever.lexical.retrieve("moon phases", scope=RetrievalFilter())
+        results = retriever.lexical.retrieve("unit fraction", scope=RetrievalFilter())
         assert results
         for chunk in results:
             assert chunk.fulltext_rank is not None
             assert CHANNEL_FULLTEXT in chunk.retrieval_sources
 
     def test_graph_expansion_is_attributable_and_bounded(self, retriever, config):
-        dense = retriever.dense.retrieve(QUERY, scope=RetrievalFilter(grade=1))
-        lexical = retriever.lexical.retrieve(QUERY, scope=RetrievalFilter(grade=1))
-        graph = retriever.graph.retrieve([dense, lexical], scope=RetrievalFilter(grade=1))
+        dense = retriever.dense.retrieve(QUERY, scope=RetrievalFilter(grade=3))
+        lexical = retriever.lexical.retrieve(QUERY, scope=RetrievalFilter(grade=3))
+        graph = retriever.graph.retrieve([dense, lexical], scope=RetrievalFilter(grade=3))
         assert retriever.graph.last_seeds
         assert len(graph) <= config.retrieval.graph_top_k
         for chunk in graph:
@@ -160,10 +178,10 @@ class TestChannels:
 
 
 class TestMetadataFiltering:
-    @pytest.mark.parametrize("grade", [1, 2, 3])
+    @pytest.mark.parametrize("grade", [3, 4, 5])
     def test_grade_filter_excludes_other_grades(self, retriever, grade):
         response = retriever.retrieve(
-            "counting and adding numbers", grade=grade, rerank=False
+            "numbers and measurement", grade=grade, rerank=False
         )
         assert response.results
         for chunk in response.diagnostics.dense:
@@ -175,16 +193,23 @@ class TestMetadataFiltering:
 
     def test_subject_filter_excludes_other_subjects(self, retriever):
         response = retriever.retrieve(
-            "measuring length", grade=2, subject="mathematics", rerank=False
+            "how do I measure length", grade=3, subject="mathematics", rerank=False
         )
         assert response.results
         for chunk in response.results:
             assert chunk.subject == "mathematics"
-            assert chunk.grade == 2
+            assert chunk.grade == 3
+
+    def test_unsupported_grades_return_no_results(self, retriever):
+        for grade in (1, 2):
+            response = retriever.retrieve("numbers", grade=grade, rerank=False)
+            assert not response.results
+            assert not response.diagnostics.dense
+            assert not response.diagnostics.fulltext
 
     def test_filter_is_applied_in_cypher_not_afterwards(self):
         """Guards the property that makes filtering cheap and correct."""
-        clause, params = build_filter_clause(RetrievalFilter(grade=1))
+        clause, params = build_filter_clause(RetrievalFilter(grade=3))
         assert clause and params
 
     def test_unit_filter_narrows_to_one_unit(self, retriever, store, ingested):
@@ -201,7 +226,7 @@ class TestFullPipeline:
     @pytest.fixture(scope="class")
     def response(retriever):
         """Retrieved once for the whole class: each query loads the reranker."""
-        return retriever.retrieve(QUERY, grade=1, subject="science")
+        return retriever.retrieve("how does weather change", grade=3, subject="science")
 
     def test_all_stages_are_preserved(self, response):
         diagnostics = response.diagnostics
@@ -233,13 +258,13 @@ class TestFullPipeline:
         legitimate, agreeing on all of them would mean the reranker is inert.
         """
         queries = [
-            "why does the moon look different on different nights",
+            "what is a unit fraction on a number line",
             "how do plants get what they need to grow",
             "what is the difference between a solid and a liquid",
         ]
         reordered = 0
         for query in queries:
-            response = retriever.retrieve(query, grade=1)
+            response = retriever.retrieve(query, grade=3)
             fused_order = [c.chunk_id for c in response.diagnostics.fused]
             final_order = [c.chunk_id for c in response.diagnostics.reranked]
             if final_order != fused_order[: len(final_order)]:
@@ -259,18 +284,185 @@ class TestFullPipeline:
                 "document_title",
                 "pages",
                 "local_pdf_path",
+                "source_id",
+                "source_role",
+                "licence",
+                "content_partition",
             ):
                 assert provenance[key] not in (None, "", "?"), key
+            assert chunk.alignment_status
+            assert chunk.content_partition in {
+                "student_evidence",
+                "teacher_strategy",
+            }
 
     def test_final_chunks_respect_the_requested_scope(self, response):
         for chunk in response.results:
-            assert chunk.grade == 1
+            assert chunk.grade == 3
             assert chunk.subject == "science"
+
+    def test_grade3_math_retrieves_engageny_primary(self, retriever):
+        response = retriever.retrieve(
+            "what is a unit fraction on a number line",
+            grade=3,
+            subject="mathematics",
+            rerank=False,
+        )
+        assert response.results
+        for chunk in response.results:
+            assert chunk.source_id == "engageny_math"
+            assert chunk.source_role == "primary"
+            assert chunk.subject == "mathematics"
+            assert chunk.licence
+            assert chunk.content_partition != "evaluation_only"
+            assert chunk.cisce_outcome_ids
+
+    def test_grade3_science_retrieves_utah_primary(self, retriever):
+        response = retriever.retrieve(
+            "how does weather change", grade=3, subject="science", rerank=False
+        )
+        assert response.results
+        for chunk in response.results:
+            assert chunk.source_id == "utah_science_oer"
+            assert chunk.source_role == "primary"
+            assert chunk.licence
+            assert chunk.content_partition != "evaluation_only"
+            assert "cisce_g3_sci_living_world" not in (chunk.cisce_outcome_ids or []) or "weather" not in (chunk.section_title or "").lower()
+        outcome_sets = [set(c.cisce_outcome_ids or []) for c in response.results]
+        assert not any(
+            {
+                "cisce_g3_sci_living_world",
+                "cisce_g3_sci_earth_weather",
+                "cisce_g3_sci_forces_materials",
+            }
+            <= ids
+            for ids in outcome_sets
+        )
+
+    def test_grade4_science_primary_is_siyavula_with_utah_support(self, retriever):
+        response = retriever.retrieve(
+            "how do plants get what they need to grow",
+            grade=4,
+            subject="science",
+            rerank=False,
+        )
+        assert response.results
+        primaries = [c for c in response.diagnostics.fused if c.source_role == "primary"]
+        supports = [c for c in response.diagnostics.fused if c.source_role == "support"]
+        assert primaries
+        assert all(c.source_id == "siyavula_natural_sciences" for c in primaries)
+        for chunk in supports:
+            assert chunk.source_id == "utah_science_oer"
+        if primaries:
+            assert response.results[0].source_role == "primary"
+            assert response.results[0].selection_reason in {
+                "primary_adequate",
+                None,
+            }
+
+    def test_grade4_math_retrieves_engageny_primary(self, retriever):
+        response = retriever.retrieve(
+            "how do you convert metric units of length",
+            grade=4,
+            subject="mathematics",
+            rerank=False,
+        )
+        assert response.results
+        for chunk in response.results:
+            assert chunk.source_id == "engageny_math"
+            assert chunk.source_role == "primary"
+            assert chunk.grade == 4
+
+    def test_grade5_science_primary_is_siyavula_with_utah_support(self, retriever):
+        response = retriever.retrieve(
+            "what is energy and how is it transferred",
+            grade=5,
+            subject="science",
+            rerank=False,
+        )
+        assert response.results
+        primaries = [c for c in response.diagnostics.fused if c.source_role == "primary"]
+        supports = [c for c in response.diagnostics.fused if c.source_role == "support"]
+        assert primaries
+        assert all(c.source_id == "siyavula_natural_sciences" for c in primaries)
+        for chunk in supports:
+            assert chunk.source_id == "utah_science_oer"
+        if supports:
+            assert response.results[0].source_role == "primary"
+
+    def test_grade5_math_retrieves_engageny_primary(self, retriever):
+        response = retriever.retrieve(
+            "how do you add fractions with unlike denominators",
+            grade=5,
+            subject="mathematics",
+            rerank=False,
+        )
+        assert response.results
+        for chunk in response.results:
+            assert chunk.source_id == "engageny_math"
+            assert chunk.source_role == "primary"
+            assert "NC" in (chunk.licence or "")
+
+    def test_production_never_returns_evaluation_only(self, retriever):
+        response = retriever.retrieve(
+            "answer key for the end of module assessment",
+            grade=3,
+            subject="mathematics",
+            rerank=False,
+        )
+        for chunk in (
+            list(response.diagnostics.dense)
+            + list(response.diagnostics.fulltext)
+            + list(response.diagnostics.graph)
+            + list(response.results)
+        ):
+            assert chunk.content_partition != "evaluation_only"
+
+    def test_homework_and_answer_key_queries_stay_on_safe_partitions(self, retriever):
+        for query in (
+            "homework answer",
+            "exit ticket answer key",
+            "sample response for the problem set",
+        ):
+            response = retriever.retrieve(
+                query, grade=3, subject="mathematics", rerank=False
+            )
+            for chunk in (
+                list(response.diagnostics.dense)
+                + list(response.diagnostics.fulltext)
+                + list(response.results)
+            ):
+                assert chunk.content_partition in {
+                    None,
+                    "student_evidence",
+                    "teacher_strategy",
+                }
+
+    def test_licence_boilerplate_is_not_returned(self, retriever):
+        response = retriever.retrieve(
+            "creative commons attribution license copyright isbn",
+            grade=3,
+            rerank=False,
+        )
+        for chunk in response.results:
+            text = (chunk.text or "").lower()
+            assert "this work is licensed under a creative commons" not in text
+
+    def test_weather_instruments_retrieves_curriculum_text(self, retriever):
+        response = retriever.retrieve(
+            "what instruments are used to measure weather",
+            grade=3,
+            subject="science",
+            rerank=False,
+        )
+        assert response.results
+        blob = " ".join(c.text.lower() for c in response.results)
+        assert "weather" in blob or "instrument" in blob or "thermometer" in blob
 
     def test_out_of_corpus_query_returns_weak_or_no_evidence(self, retriever):
         """Retrieval must not silently invent relevance for a foreign topic."""
         response = retriever.retrieve(
-            "explain the Higgs boson and quantum chromodynamics", grade=1
+            "explain the Higgs boson and quantum chromodynamics", grade=3
         )
         top = response.results[0].rerank_score if response.results else None
         assert top is None or top < 0.9

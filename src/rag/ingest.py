@@ -32,12 +32,21 @@ from .concepts import (
     build_vocabulary,
     mentions_from_own_titles,
 )
+from .alignment import outcome_ids_for
 from .config import RagConfig
 from .corpus import discover_documents
 from .embeddings import BGEM3Embedder, EmbeddingError
 from .graph_schema import initialize_schema
 from .logging_utils import get_logger
 from .neo4j_store import Neo4jStore
+from .epub_parser import EpubParseError, parse_epub_document
+from .partitions import (
+    EVALUATION_ONLY,
+    EXCLUDED_BOILERPLATE,
+    PRACTICE_ONLY,
+    classify_section,
+    is_production_partition,
+)
 from .pdf_parser import PdfParseError, compute_content_hash, parse_document
 from .schemas import Chunk, ConceptMention, DocumentMetadata, ParsedDocument
 
@@ -48,7 +57,8 @@ LOGGER = get_logger(__name__)
 #   v2: chunk overlap now carries trailing sentences when a paragraph is larger
 #       than the overlap budget, and alpha-channel images are saved as PNG
 #       instead of being skipped.
-INGEST_VERSION = "ingest-v2"
+#   v4: section-aware partitions, boilerplate/practice exclusion, granular CISCE.
+INGEST_VERSION = "ingest-v4"
 
 # Ceiling on MENTIONS edges per concept, to stop a common term from becoming a
 # hub node that graph expansion would traverse into uselessly.
@@ -83,6 +93,16 @@ MERGE (d:Document {document_id: $document_id})
       d.relative_pdf_path = $relative_pdf_path,
       d.resource_type = $resource_type,
       d.audience = $audience,
+      d.source_id = $source_id,
+      d.publisher = $publisher,
+      d.source_role = $source_role,
+      d.licence = $licence,
+      d.licence_url = $licence_url,
+      d.source_url = $source_url,
+      d.content_partition = $content_partition,
+      d.cisce_outcome_ids = $cisce_outcome_ids,
+      d.alignment_status = $alignment_status,
+      d.file_format = $file_format,
       d.grade = $grade,
       d.subject = $subject,
       d.unit_id = $unit_id,
@@ -241,6 +261,32 @@ SET d.status = 'ingested',
     d.ingested_at = $timestamp
 """
 
+_REFRESH_ALIGNMENT = """
+MATCH (d:Document {document_id: $document_id})
+SET d.cisce_outcome_ids = $cisce_outcome_ids,
+    d.alignment_status = $alignment_status,
+    d.source_role = $source_role,
+    d.licence = $licence,
+    d.licence_url = $licence_url,
+    d.source_id = $source_id,
+    d.publisher = $publisher,
+    d.source_url = $source_url
+WITH d
+MATCH (d)-[:HAS_PAGE]->(:Page)-[:HAS_SECTION]->(:Section)-[:HAS_CHUNK]->(c:Chunk)
+SET c.source_role = $source_role,
+    c.licence = $licence,
+    c.licence_url = $licence_url,
+    c.source_id = $source_id,
+    c.publisher = $publisher,
+    c.source_url = $source_url
+"""
+
+_LIVE_GRAPH_COUNTS = """
+MATCH (c:Chunk) WITH count(c) AS chunks
+MATCH ()-[r]->() WITH chunks, count(r) AS relationships
+MATCH (n) RETURN chunks, relationships, count(n) AS nodes
+"""
+
 _MENTION_COUNTS = """
 MATCH (co:Concept)<-[m:MENTIONS]-(:Chunk)
 WITH co, count(m) AS mentions
@@ -271,6 +317,16 @@ class IngestStats:
     pages_without_text: int = 0
     sections: int = 0
     chunks: int = 0
+    chunks_parsed: int = 0
+    chunks_excluded_partition: int = 0
+    chunks_excluded_boilerplate: int = 0
+    chunks_excluded_practice: int = 0
+    chunks_excluded_evaluation: int = 0
+    chunks_written: int = 0
+    nodes_deleted: int = 0
+    live_chunk_count: int = 0
+    live_node_count: int = 0
+    live_relationship_count: int = 0
     images: int = 0
     concept_mentions: int = 0
     image_concept_links: int = 0
@@ -292,6 +348,16 @@ class IngestStats:
             "pages_without_text": self.pages_without_text,
             "sections": self.sections,
             "chunks": self.chunks,
+            "chunks_parsed": self.chunks_parsed,
+            "chunks_excluded_partition": self.chunks_excluded_partition,
+            "chunks_excluded_boilerplate": self.chunks_excluded_boilerplate,
+            "chunks_excluded_practice": self.chunks_excluded_practice,
+            "chunks_excluded_evaluation": self.chunks_excluded_evaluation,
+            "chunks_written": self.chunks_written,
+            "nodes_deleted": self.nodes_deleted,
+            "live_chunk_count": self.live_chunk_count,
+            "live_node_count": self.live_node_count,
+            "live_relationship_count": self.live_relationship_count,
             "images": self.images,
             "concepts": self.concepts,
             "concept_mentions": self.concept_mentions,
@@ -315,7 +381,14 @@ class IngestStats:
             f"  pages            : {self.pages} "
             f"({self.pages_without_text} without extractable text)",
             f"  sections         : {self.sections}",
-            f"  chunks           : {self.chunks}",
+            f"  chunks           : {self.chunks_written} written "
+            f"({self.chunks_parsed} parsed; "
+            f"{self.chunks_excluded_evaluation} evaluation, "
+            f"{self.chunks_excluded_practice} practice, "
+            f"{self.chunks_excluded_boilerplate} boilerplate excluded)",
+            f"  live graph       : {self.live_chunk_count} chunks, "
+            f"{self.live_node_count} nodes, "
+            f"{self.live_relationship_count} relationships",
             f"  images           : {self.images}",
             f"  concepts         : {self.concepts}",
             f"  concept mentions : {self.concept_mentions}",
@@ -411,6 +484,23 @@ class CorpusIngestor:
             return False
         return True
 
+    def _refresh_alignment_metadata(self, metadata: DocumentMetadata) -> None:
+        """Update provenance on skipped documents so crosswalk fixes apply."""
+        self.store.execute_write(
+            _REFRESH_ALIGNMENT,
+            {
+                "document_id": metadata.document_id,
+                "cisce_outcome_ids": list(metadata.cisce_outcome_ids),
+                "alignment_status": metadata.alignment_status,
+                "source_role": metadata.source_role,
+                "licence": metadata.licence,
+                "licence_url": metadata.licence_url,
+                "source_id": metadata.source_id,
+                "publisher": metadata.publisher,
+                "source_url": metadata.source_url,
+            },
+        )
+
     # -- graph writes ------------------------------------------------------ #
 
     def _upsert_hierarchy(self, parsed: ParsedDocument) -> None:
@@ -435,6 +525,16 @@ class CorpusIngestor:
                 "relative_pdf_path": metadata.relative_pdf_path,
                 "resource_type": metadata.resource_type,
                 "audience": metadata.audience,
+                "source_id": metadata.source_id,
+                "publisher": metadata.publisher,
+                "source_role": metadata.source_role,
+                "licence": metadata.licence,
+                "licence_url": metadata.licence_url,
+                "source_url": metadata.source_url,
+                "content_partition": metadata.content_partition,
+                "cisce_outcome_ids": list(metadata.cisce_outcome_ids),
+                "alignment_status": metadata.alignment_status,
+                "file_format": metadata.file_format,
                 "page_count": parsed.page_count,
                 "content_hash": parsed.content_hash,
                 "ingest_version": INGEST_VERSION,
@@ -679,7 +779,14 @@ class CorpusIngestor:
         skip_embeddings: bool = False,
         force: bool = False,
     ) -> str:
-        """Ingest one PDF. Returns "ingested", "skipped" or "failed"."""
+        """Ingest one source file. Returns "ingested", "skipped" or "failed"."""
+        if metadata.content_partition == EVALUATION_ONLY:
+            LOGGER.info(
+                "Skipping evaluation-only file %s (not stored in production graph)",
+                metadata.relative_pdf_path,
+            )
+            return "skipped"
+
         try:
             content_hash = compute_content_hash(metadata.local_pdf_path)
         except OSError as exc:
@@ -690,16 +797,24 @@ class CorpusIngestor:
         if not force and self._document_is_current(
             metadata, content_hash, need_embeddings=not skip_embeddings
         ):
+            self._refresh_alignment_metadata(metadata)
             LOGGER.info("Skipping %s (already up to date)", metadata.relative_pdf_path)
             return "skipped"
 
         try:
-            parsed = parse_document(
-                metadata,
-                images_root=self.config.paths.images_dir,
-                config=self.config.ingest,
-            )
-        except PdfParseError as exc:
+            if metadata.file_format == "epub":
+                parsed = parse_epub_document(
+                    metadata,
+                    images_root=self.config.paths.images_dir,
+                    config=self.config.ingest,
+                )
+            else:
+                parsed = parse_document(
+                    metadata,
+                    images_root=self.config.paths.images_dir,
+                    config=self.config.ingest,
+                )
+        except (PdfParseError, EpubParseError) as exc:
             self.stats.failures.append((metadata.relative_pdf_path, str(exc)))
             LOGGER.error("Failed to parse %s: %s", metadata.relative_pdf_path, exc)
             return "failed"
@@ -708,16 +823,75 @@ class CorpusIngestor:
             self.stats.warnings.append((metadata.relative_pdf_path, warning))
 
         chunks = chunk_document(parsed, self._token_counter, self.config.chunking)
+        self.stats.chunks_parsed += len(chunks)
+        production_chunks: list[Chunk] = []
+        previous_title = ""
+        for chunk in chunks:
+            decision = classify_section(
+                chunk.section_title,
+                chunk.text,
+                previous_title=previous_title,
+                default=metadata.content_partition,
+            )
+            previous_title = chunk.section_title
+            chunk.content_partition = decision.partition
+            outcome_ids, granularity, status = outcome_ids_for(
+                grade=chunk.grade,
+                subject=chunk.subject,
+                unit_slug=metadata.unit_slug,
+                section_title=chunk.section_title,
+                text=chunk.text,
+            )
+            chunk.cisce_outcome_ids = outcome_ids
+            chunk.mapping_granularity = granularity
+            chunk.alignment_status = status
+            if decision.partition == EVALUATION_ONLY:
+                self.stats.chunks_excluded_evaluation += 1
+                self.stats.chunks_excluded_partition += 1
+                continue
+            if decision.partition == PRACTICE_ONLY:
+                self.stats.chunks_excluded_practice += 1
+                self.stats.chunks_excluded_partition += 1
+                continue
+            if decision.partition == EXCLUDED_BOILERPLATE:
+                self.stats.chunks_excluded_boilerplate += 1
+                self.stats.chunks_excluded_partition += 1
+                continue
+            if not is_production_partition(decision.partition):
+                self.stats.chunks_excluded_partition += 1
+                continue
+            production_chunks.append(chunk)
+        skipped = len(chunks) - len(production_chunks)
+        if skipped:
+            self.stats.warnings.append(
+                (
+                    metadata.relative_pdf_path,
+                    f"skipped {skipped} non-production chunk(s) "
+                    f"(evaluation/practice/boilerplate)",
+                )
+            )
+        chunks = production_chunks
         if not chunks:
             self.stats.warnings.append(
                 (metadata.relative_pdf_path, "produced no chunks; nothing to retrieve")
             )
 
-        self._purge_document_content(metadata)
+        records = self.store.execute_write(
+            _PURGE_DOCUMENT_CONTENT, {"document_id": metadata.document_id}
+        )
+        deleted = int(records[0]["deleted"]) if records else 0
+        self.stats.nodes_deleted += deleted
+        if deleted:
+            LOGGER.info(
+                "Removed %d stale node(s) from a previous ingest of %s",
+                deleted,
+                metadata.relative_pdf_path,
+            )
         self._upsert_hierarchy(parsed)
         self._upsert_pages(parsed)
         self._upsert_sections(parsed)
         self._upsert_chunks(chunks)
+        self.stats.chunks_written += len(chunks)
         image_count = self._upsert_images(parsed)
 
         if not skip_embeddings and chunks:
@@ -805,9 +979,25 @@ class CorpusIngestor:
         if link_concepts:
             self.link_concepts()
         self._finalize_concepts()
+        self._record_live_graph_counts()
         self.stats.elapsed_s = time.perf_counter() - started
         self._write_report(corpus_stats)
         return self.stats
+
+    def _record_live_graph_counts(self) -> None:
+        records = self.store.read(_LIVE_GRAPH_COUNTS)
+        if not records:
+            return
+        row = records[0]
+        self.stats.live_chunk_count = int(row.get("chunks") or 0)
+        self.stats.live_node_count = int(row.get("nodes") or 0)
+        self.stats.live_relationship_count = int(row.get("relationships") or 0)
+        LOGGER.info(
+            "Live graph: %d chunks, %d nodes, %d relationships",
+            self.stats.live_chunk_count,
+            self.stats.live_node_count,
+            self.stats.live_relationship_count,
+        )
 
     def _finalize_concepts(self) -> None:
         records = self.store.execute_write(_MENTION_COUNTS)

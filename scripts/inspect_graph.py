@@ -6,7 +6,7 @@ Read-only. Nothing is created, modified or deleted.
     python scripts/inspect_graph.py                       # counts + coverage
     python scripts/inspect_graph.py --units               # list every unit
     python scripts/inspect_graph.py --concepts 30         # top concepts
-    python scripts/inspect_graph.py --unit grade_02:science:unit_01_properties_of_matter
+    python scripts/inspect_graph.py --unit grade_03:science:unit_01_science_oer
     python scripts/inspect_graph.py --chunk <chunk_id>    # chunk neighbourhood
     python scripts/inspect_graph.py --images 10           # image -> page -> unit
 """
@@ -108,6 +108,33 @@ def show_coverage(store: Neo4jStore, embedding_version: str) -> None:
         print("  (none)")
     for row in empty:
         print(f"  {row['path']} ({row['pages']} pages)")
+
+
+def show_sources(store: Neo4jStore) -> None:
+    print("\nSOURCES (documents / chunks by publisher role)")
+    print(RULE)
+    rows = store.read(
+        """
+        MATCH (d:Document)
+        RETURN d.source_id AS source_id, d.grade AS grade, d.subject AS subject,
+               d.source_role AS role, d.licence AS licence,
+               count(d) AS documents, sum(coalesce(d.page_count, 0)) AS pages,
+               sum(coalesce(d.chunk_count, 0)) AS chunks,
+               sum(coalesce(d.image_count, 0)) AS images
+        ORDER BY source_id, grade, subject
+        """
+    )
+    if not rows:
+        print("  (none)")
+        return
+    for row in rows:
+        print(
+            f"  G{row['grade']} {row['subject']:12s} {row['role']:8s} "
+            f"docs={row['documents']:>3} pages={row['pages']:>6,} "
+            f"chunks={row['chunks']:>5,} images={row['images']:>6,} "
+            f"{row['source_id']}"
+        )
+        print(f"      licence: {(row['licence'] or '?')[:80]}")
 
 
 def show_units(store: Neo4jStore) -> None:
@@ -404,6 +431,7 @@ def main() -> int:
         if not targeted:
             show_counts(store)
             show_coverage(store, config.embedding_version)
+            show_sources(store)
         if args.units:
             show_units(store)
         if args.concepts:

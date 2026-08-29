@@ -1,0 +1,320 @@
+# Original paraphrased CISCE Primary STEM outcomes for Grades 3–5.
+# CISCE is the alignment authority only: the official PDF is not ingested,
+# embedded, or retrieved. Summaries below are short paraphrases, not excerpts.
+# Every mapping is marked needs_human_review until a human signs the reviewer field.
+
+outcomes:
+  - outcome_id: cisce_g3_math_number_operations
+    grade: 3
+    subject: mathematics
+    summary: Use place value and the four operations to solve whole-number problems.
+    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class III)"
+    mapped_units:
+      - module_01_properties_of_multiplication_and_division
+      - module_03_multiplication_and_division_with_units_of_0_1_6_9_and_multip
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g3_math_measurement
+    grade: 3
+    subject: mathematics
+    summary: Measure and compare length, mass, capacity and time with standard units.
+    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class III)"
+    mapped_units:
+      - module_02_place_value_and_problem_solving_with_units_of_measure
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g3_math_fractions
+    grade: 3
+    subject: mathematics
+    summary: Recognise unit fractions and locate them on a number line.
+    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class III)"
+    mapped_units:
+      - module_05_fractions_as_numbers_on_the_number_line
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g3_math_geometry
+    grade: 3
+    subject: mathematics
+    summary: Describe plane shapes, area of rectangles, and simple perimeter problems.
+    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class III)"
+    mapped_units:
+      - module_04_multiplication_and_area
+      - module_07_geometry_and_measurement_word_problems
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g3_math_data
+    grade: 3
+    subject: mathematics
+    summary: Collect, display and read simple categorical data.
+    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class III)"
+    mapped_units:
+      - module_06_collecting_and_displaying_data
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g4_math_place_value
+    grade: 4
+    subject: mathematics
+    summary: Use place value to round and compute with multi-digit whole numbers.
+    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class IV)"
+    mapped_units:
+      - module_01_place_value_rounding_and_algorithms_for_addition_and_subtrac
+      - module_03_multi_digit_multiplication_and_division
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g4_math_measurement
+    grade: 4
+    subject: mathematics
+    summary: Convert metric units and solve measurement problems.
+    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class IV)"
+    mapped_units:
+      - module_02_unit_conversions_and_problem_solving_with_metric_measurement
+      - module_07_exploring_measurement_with_multiplication
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g4_math_fractions_decimals
+    grade: 4
+    subject: mathematics
+    summary: Compare fractions and relate tenths and hundredths to decimal notation.
+    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class IV)"
+    mapped_units:
+      - module_05_fraction_equivalence_ordering_and_operations
+      - module_06_decimal_fractions
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g4_math_geometry
+    grade: 4
+    subject: mathematics
+    summary: Measure angles and classify plane figures.
+    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class IV)"
+    mapped_units:
+      - module_04_angle_measure_and_plane_figures
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_math_decimals
+    grade: 5
+    subject: mathematics
+    summary: Use place value with decimals and operate on decimal numbers.
+    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class V)"
+    mapped_units:
+      - module_01_place_value_and_decimal_fractions
+      - module_02_multi_digit_whole_number_and_decimal_fraction_operations
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_math_fractions
+    grade: 5
+    subject: mathematics
+    summary: Add, subtract, multiply and divide fractions in problem contexts.
+    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class V)"
+    mapped_units:
+      - module_03_addition_and_subtraction_of_fractions
+      - module_04_multiplication_and_division_of_fractions_and_decimal_fractio
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_math_volume_coordinates
+    grade: 5
+    subject: mathematics
+    summary: Relate volume to multiplication and locate points in the first quadrant.
+    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class V)"
+    mapped_units:
+      - module_05_addition_and_multiplication_with_volume_and_area
+      - module_06_problem_solving_with_the_coordinate_plane
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g3_sci_living_world
+    grade: 3
+    subject: science
+    summary: Observe organisms, habitats and how living things use resources.
+    cisce_page: "PrimaryCurriculum.pdf p.152 (Science, Class III)"
+    mapped_units:
+      - unit_01_science_oer
+    section_patterns:
+      - organism
+      - habitat
+      - living
+      - life cycle
+      - inherited
+      - trait
+      - plant
+      - animal
+      - egg
+      - polar bear
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g3_sci_earth_weather
+    grade: 3
+    subject: science
+    summary: Describe weather, seasons and simple Earth processes from observation.
+    cisce_page: "PrimaryCurriculum.pdf p.152 (Science, Class III)"
+    mapped_units:
+      - unit_01_science_oer
+    section_patterns:
+      - weather
+      - season
+      - flood
+      - rain
+      - wind
+      - instrument
+      - cloud
+      - snow
+      - climate
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g3_sci_forces_materials
+    grade: 3
+    subject: science
+    summary: Explore motion, forces and properties of everyday materials.
+    cisce_page: "PrimaryCurriculum.pdf p.152 (Science, Class III)"
+    mapped_units:
+      - unit_01_science_oer
+    section_patterns:
+      - force
+      - magnet
+      - motion
+      - material
+      - zipper
+      - sled
+      - ball
+      - bounce
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g4_sci_life
+    grade: 4
+    subject: science
+    summary: Describe plants, animals and life processes using primary learner text.
+    cisce_page: "PrimaryCurriculum.pdf (Science, Class IV; confirm printed page in review)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - plant
+      - animal
+      - living
+      - food chain
+      - habitat
+      - photosynthesis
+      - seed
+      - insect
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g4_sci_matter_energy
+    grade: 4
+    subject: science
+    summary: Investigate matter, materials, energy and change in everyday contexts.
+    cisce_page: "PrimaryCurriculum.pdf (Science, Class IV; confirm printed page in review)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - energy
+      - matter
+      - material
+      - electricity
+      - heat
+      - sound
+      - solid
+      - liquid
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g4_sci_earth
+    grade: 4
+    subject: science
+    summary: Relate Earth features, soil, water and sky observations to local evidence.
+    cisce_page: "PrimaryCurriculum.pdf (Science, Class IV; confirm printed page in review)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - earth
+      - soil
+      - rock
+      - water
+      - moon
+      - planet
+      - weather
+      - sky
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_sci_life
+    grade: 5
+    subject: science
+    summary: Explain life processes and ecosystems with Grade 5 learner evidence.
+    cisce_page: "PrimaryCurriculum.pdf (Science, Class V; confirm printed page in review)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - ecosystem
+      - food web
+      - plant
+      - animal
+      - cell
+      - organism
+      - habitat
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_sci_matter_energy
+    grade: 5
+    subject: science
+    summary: Use particle ideas, energy transfers and simple investigations of materials.
+    cisce_page: "PrimaryCurriculum.pdf (Science, Class V; confirm printed page in review)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - energy
+      - particle
+      - electricity
+      - circuit
+      - matter
+      - force
+      - chemical
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_sci_earth_space
+    grade: 5
+    subject: science
+    summary: Connect Earth systems and the solar system to Grade 5 learner text.
+    cisce_page: "PrimaryCurriculum.pdf (Science, Class V; confirm printed page in review)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - earth
+      - solar
+      - planet
+      - moon
+      - star
+      - space
+      - rock
+      - soil
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""

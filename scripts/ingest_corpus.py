@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
-"""Ingest the Core Knowledge corpus into the Neo4j curriculum graph.
+"""Ingest the Grade 3–5 STEM corpus into the Neo4j curriculum graph.
 
-Steps: discover PDFs (using manifest.json where available) -> parse structured
-text, pages, sections and images with PyMuPDF -> hierarchical chunks -> graph
-nodes and relationships -> conservative concept links -> BGE-M3 dense embeddings
--> vector and full-text indexes.
+Steps: discover catalog files -> parse PDF/ePUB -> hierarchical chunks -> graph
+nodes and relationships -> conservative concept links -> BGE-M3 dense
+embeddings.
 
 Default behaviour is safe and idempotent: unchanged, fully embedded documents are
 skipped, so an interrupted run resumes simply by re-running the same command.
-Nothing is deleted without --reset.
+Nothing is deleted without an explicit replacement command.
 
     python scripts/ingest_corpus.py
-    python scripts/ingest_corpus.py --grade 1 --subject science
+    python scripts/ingest_corpus.py --grade 3 --subject science
     python scripts/ingest_corpus.py --limit 5
-    python scripts/ingest_corpus.py --force              # re-parse and re-embed
-    python scripts/ingest_corpus.py --skip-embeddings    # structure only
-    python scripts/ingest_corpus.py --reset --yes        # DESTRUCTIVE rebuild
+    python scripts/ingest_corpus.py --force
+    python scripts/ingest_corpus.py --skip-embeddings
+    python scripts/replace_corpus.py --purge-all-curriculum --yes
 """
 
 from __future__ import annotations
@@ -87,7 +86,7 @@ def main() -> int:
     if not config.paths.corpus_path.is_dir():
         print(
             f"Corpus not found at {config.paths.corpus_path}. Download it first:\n"
-            f"  python scripts/download_core_knowledge_stem.py",
+            f"  python scripts/download_curriculum.py",
             file=sys.stderr,
         )
         return 2

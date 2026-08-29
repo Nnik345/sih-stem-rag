@@ -14,6 +14,7 @@ Loading is lazy and :meth:`unload` frees memory before the generator is loaded.
 from __future__ import annotations
 
 import gc
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -23,6 +24,14 @@ from .logging_utils import get_logger
 from .schemas import RetrievedChunk
 
 LOGGER = get_logger(__name__)
+
+
+def _sigmoid(logit: float) -> float:
+    """Map a raw reranker logit to (0, 1). Not used as the evidence floor."""
+    if logit >= 0:
+        return 1.0 / (1.0 + math.exp(-logit))
+    exp = math.exp(logit)
+    return exp / (1.0 + exp)
 
 
 class RerankerError(RuntimeError):
@@ -185,7 +194,10 @@ class BGEReranker:
 
         scores = self.score_pairs(query, [c.text for c in candidates])
         for candidate, score in zip(candidates, scores):
-            candidate.rerank_score = float(score)
+            logit = float(score)
+            candidate.raw_rerank_score = logit
+            candidate.rerank_score = logit
+            candidate.rerank_probability = _sigmoid(logit)
 
         ordered = sorted(
             candidates,

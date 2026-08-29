@@ -303,6 +303,15 @@ def chunk_section(
                 resource_type=metadata.resource_type,
                 audience=metadata.audience,
                 local_pdf_path=str(metadata.local_pdf_path),
+                source_id=metadata.source_id,
+                publisher=metadata.publisher,
+                source_role=metadata.source_role,
+                licence=metadata.licence,
+                licence_url=metadata.licence_url,
+                source_url=metadata.source_url,
+                content_partition=metadata.content_partition,
+                cisce_outcome_ids=list(metadata.cisce_outcome_ids),
+                alignment_status=metadata.alignment_status,
             )
         )
     return chunks

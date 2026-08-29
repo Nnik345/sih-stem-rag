@@ -5,12 +5,12 @@ provenance needed later (source path, page number, page order, section title).
 
 Design notes
 ------------
-* The Core Knowledge PDFs are digitally generated, so the text layer is used
+* The approved STEM PDFs are digitally generated, so the text layer is used
   directly. OCR is opt-in and only ever attempted for a page with no usable text.
 * Almost none of these PDFs have a usable table of contents (the few TOC entries
   that exist point at cover artwork), so section boundaries are detected from
   typography. Body font size is measured per document rather than assumed: a
-  Grade 1 student reader sets body text at 19 pt while a teacher guide uses
+  Grade 3 student reader sets body text at 19 pt while a teacher guide uses
   12 pt, so a fixed threshold would be wrong for one of them.
 * Vector diagrams cannot be extracted as raster images. That is expected and
   never fails ingestion -- the Page node keeps the source PDF path and page
@@ -62,6 +62,9 @@ _BOLD_FONT_MARKERS = ("bold", "black", "heavy", "semibold", "-bd")
 _SENTENCE_END = (".", "!", "?", ",", ";")
 _PAGE_NUMBER_RE = re.compile(r"^\s*(?:page\s*)?[ivxlcdm\d]{1,6}\s*$", re.IGNORECASE)
 _WHITESPACE_RE = re.compile(r"[ \t\u00a0]+")
+# Fold only tiny caption-like sections; do not swallow whole topics.
+_MAX_MERGE_PAGES = 2
+_FURNITURE_PAGE_RATIO = 0.35
 
 # --- Junk-text filters ------------------------------------------------------ #
 # Table-of-contents dot leaders ("Introduction . . . . . . 11") and decorative
@@ -186,7 +189,38 @@ def _is_meaningful_text(text: str) -> bool:
     if not dense:
         return False
     alnum = sum(1 for ch in dense if ch.isalnum())
-    return (alnum / len(dense)) >= _MIN_ALNUM_RATIO
+    if (alnum / len(dense)) < _MIN_ALNUM_RATIO:
+        return False
+    from .partitions import is_boilerplate_text
+
+    if len(stripped) < 400 and is_boilerplate_text(stripped):
+        return False
+    return True
+
+
+def _annotate_page_role(page: ParsedPage) -> None:
+    """Label pages for extraction audits. Does not drop curriculum text by itself."""
+    from .partitions import is_boilerplate_text
+
+    text = page.text or ""
+    if page.char_count < 80:
+        page.page_role = "front_matter"
+        page.skip_reason = "cover, title, or near-empty page"
+        return
+    head = text[:800].lower()
+    if page.page_number <= 5 and (
+        "table of contents" in head or "copyright" in head or "isbn" in head
+    ):
+        if is_boilerplate_text(text[:900]) or page.char_count < 250:
+            page.page_role = "front_matter"
+            page.skip_reason = "front matter or publication metadata"
+            return
+    if is_boilerplate_text(text) and page.char_count < 900:
+        page.page_role = "credits"
+        page.skip_reason = "licence or credits boilerplate"
+        return
+    page.page_role = "curriculum"
+    page.skip_reason = ""
 
 
 def _collect_page_images(
@@ -438,32 +472,42 @@ def _collect_raw_sections(pages: list[ParsedPage]) -> list[_RawSection]:
 def _merge_short_sections(
     raw: list[_RawSection], min_section_chars: int
 ) -> list[_RawSection]:
-    """Fold undersized sections forward so chunks can reach the target size.
+    """Fold tiny caption-like sections without mixing unrelated topics.
 
-    These PDFs use many short sub-headings; taken literally they yield sections
-    of a paragraph or two and therefore chunks far below the configured target.
-    A too-short section absorbs the following one, and the absorbed heading is
-    kept inline as a paragraph so its wording stays searchable.
+    A too-short section absorbs the following one only when both occupy at most
+    ``_MAX_MERGE_PAGES`` pages. Larger instructional headings stay separate so
+    weather, life science and forces pages are not glued into one chunk.
     """
     if min_section_chars <= 0:
         return raw
 
+    def page_span(section: _RawSection) -> tuple[int, int]:
+        pages = [p.page_number for p in section.paragraphs] or [0]
+        return min(pages), max(pages)
+
     merged: list[_RawSection] = []
     for section in raw:
-        if merged and merged[-1].char_count < min_section_chars:
-            previous = merged[-1]
-            if section.title:
-                page = (
-                    section.paragraphs[0].page_number
-                    if section.paragraphs
-                    else previous.paragraphs[-1].page_number
-                )
-                previous.paragraphs.append(
-                    Paragraph(text=section.title, page_number=page)
-                )
-            previous.paragraphs.extend(section.paragraphs)
+        if not merged:
+            merged.append(section)
             continue
-        merged.append(section)
+        previous = merged[-1]
+        if previous.char_count >= min_section_chars:
+            merged.append(section)
+            continue
+        _, prev_end = page_span(previous)
+        nxt_start, nxt_end = page_span(section)
+        span = max(prev_end, nxt_end) - min(page_span(previous)[0], nxt_start)
+        if span > _MAX_MERGE_PAGES:
+            merged.append(section)
+            continue
+        if section.title:
+            page = (
+                section.paragraphs[0].page_number
+                if section.paragraphs
+                else previous.paragraphs[-1].page_number
+            )
+            previous.paragraphs.append(Paragraph(text=section.title, page_number=page))
+        previous.paragraphs.extend(section.paragraphs)
     return merged
 
 
@@ -538,11 +582,11 @@ def parse_document(
         if page_count == 0:
             raise PdfParseError(f"PDF has no pages: {path}")
 
-        images_per_page = (
-            [_collect_page_images(doc, i) for i in range(page_count)]
-            if config.extract_images
-            else [[] for _ in range(page_count)]
-        )
+        images_per_page = [_collect_page_images(doc, i) for i in range(page_count)]
+        skipped_media = 0
+        if not (config.extract_images and metadata.extract_images):
+            skipped_media = sum(len(entries) for entries in images_per_page)
+            images_per_page = [[] for _ in range(page_count)]
         template = _template_xrefs(images_per_page, page_count)
         if template:
             LOGGER.debug(
@@ -601,7 +645,7 @@ def parse_document(
                 image_only=not has_text,
             )
 
-            if config.extract_images:
+            if config.extract_images and metadata.extract_images:
                 parsed_page.images = _extract_images_for_page(
                     doc,
                     page_index,
@@ -617,7 +661,12 @@ def parse_document(
                 )
 
             pages.append(parsed_page)
+            _annotate_page_role(parsed_page)
 
+        if skipped_media:
+            warnings.append(
+                f"skipped {skipped_media} embedded image(s): reuse licence not established"
+            )
         sections = _build_sections(metadata, pages, config.min_section_chars)
         pdf_title = (doc.metadata or {}).get("title") or None
         if pdf_title and pdf_title.strip().lower() in {"", "untitled"}:

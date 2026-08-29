@@ -67,6 +67,15 @@ def _merge_into(target: RetrievedChunk, source: RetrievedChunk) -> None:
         "resource_type",
         "audience",
         "local_pdf_path",
+        "source_id",
+        "publisher",
+        "source_role",
+        "licence",
+        "licence_url",
+        "source_url",
+        "content_partition",
+        "alignment_status",
+        "mapping_granularity",
     ):
         if getattr(target, field_name) is None:
             setattr(target, field_name, getattr(source, field_name))
@@ -87,6 +96,8 @@ def _merge_into(target: RetrievedChunk, source: RetrievedChunk) -> None:
 
     for channel in source.retrieval_sources:
         target.add_source(channel)
+    if source.cisce_outcome_ids and not target.cisce_outcome_ids:
+        target.cisce_outcome_ids = list(source.cisce_outcome_ids)
 
 
 def fuse(
@@ -118,7 +129,10 @@ def fuse(
 
     ordered = sorted(
         fused.values(),
-        key=lambda c: (scores[c.chunk_id], -(c.dense_rank or 10**6)),
+        key=lambda c: (
+            scores[c.chunk_id],
+            -(c.dense_rank or 10**6),
+        ),
         reverse=True,
     )
 
@@ -137,6 +151,60 @@ def fuse(
         len(selected),
     )
     return selected
+
+
+def _is_adequate(chunk: RetrievedChunk, min_score: float | None) -> bool:
+    if min_score is None or chunk.rerank_score is None:
+        return True
+    return chunk.rerank_score >= min_score
+
+
+def select_final_evidence(
+    chunks: Sequence[RetrievedChunk],
+    *,
+    limit: int,
+    min_score: float | None = None,
+) -> list[RetrievedChunk]:
+    """Choose final evidence without mutating fused/rerank order.
+
+    Source-role preference applies only here. Adequate primary evidence is
+    taken first. Adequate support is added when it fills a gap, offers an
+    alternative explanation, or no adequate primary exists. An inadequate
+    primary never displaces adequate support.
+    """
+    if not chunks or limit <= 0:
+        return []
+
+    primary_ok = [c for c in chunks if c.source_role != "support" and _is_adequate(c, min_score)]
+    support_ok = [c for c in chunks if c.source_role == "support" and _is_adequate(c, min_score)]
+    primary_weak = [c for c in chunks if c.source_role != "support" and not _is_adequate(c, min_score)]
+    support_weak = [c for c in chunks if c.source_role == "support" and not _is_adequate(c, min_score)]
+
+    selected: list[RetrievedChunk] = []
+    for chunk in primary_ok:
+        if len(selected) >= limit:
+            break
+        chunk.selection_reason = "primary_adequate"
+        selected.append(chunk)
+    for chunk in support_ok:
+        if len(selected) >= limit:
+            break
+        chunk.selection_reason = (
+            "no_adequate_primary" if not primary_ok else "support_fills_gap"
+        )
+        selected.append(chunk)
+    if len(selected) < limit:
+        for chunk in primary_weak + support_weak:
+            if len(selected) >= limit:
+                break
+            chunk.selection_reason = "below_score_floor_fill"
+            selected.append(chunk)
+    return selected
+
+
+def prefer_primary(chunks: Sequence[RetrievedChunk]) -> list[RetrievedChunk]:
+    """Backward-compatible alias: prefer primary when every chunk is adequate."""
+    return select_final_evidence(list(chunks), limit=max(len(chunks), 1), min_score=None)
 
 
 def fuse_standard_channels(

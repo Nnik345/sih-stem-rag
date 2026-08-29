@@ -121,10 +121,10 @@ def test_chunk_carries_full_lineage(parsed_document, counter, chunking_config):
         assert chunk.section_id
         assert chunk.page_ids
         assert chunk.document_id == parsed_document.metadata.document_id
-        assert chunk.unit_id == "grade_02:science:unit_01_matter"
-        assert chunk.subject_id == "grade_02:science"
-        assert chunk.grade_id == "grade_02"
-        assert chunk.grade == 2
+        assert chunk.unit_id == "grade_03:science:unit_01_matter"
+        assert chunk.subject_id == "grade_03:science"
+        assert chunk.grade_id == "grade_03"
+        assert chunk.grade == 3
         assert chunk.subject == "science"
         assert chunk.page_start <= chunk.page_end
 

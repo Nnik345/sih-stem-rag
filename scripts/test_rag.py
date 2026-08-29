@@ -6,9 +6,9 @@ generator is loaded, and when evidence is insufficient the generator is either
 skipped entirely (--strict) or asked to decline rather than invent an answer.
 
     python scripts/test_rag.py                                    # interactive
-    python scripts/test_rag.py -q "why do plants need sunlight" -g 3 -s science
-    python scripts/test_rag.py -q "what is a black hole" -g 1 -s science --strict
-    python scripts/test_rag.py -q "measuring length" -g 2 -s mathematics --retrieval-only
+    python scripts/test_rag.py -q "how do plants make food" -g 4 -s science
+    python scripts/test_rag.py -q "what is a unit fraction" -g 3 -s mathematics --strict
+    python scripts/test_rag.py -q "how do I find the area of a rectangle" -g 3 -s mathematics --retrieval-only
 """
 
 from __future__ import annotations
@@ -60,8 +60,14 @@ def print_diagnostics(result: RagResult) -> None:
             f"sources={chunk.retrieval_source}"
         )
         print(
-            f"           G{chunk.grade} {chunk.subject} | {chunk.unit_title} | "
+            f"           G{chunk.grade} {chunk.subject} | role={chunk.source_role} | "
+            f"{chunk.source_id} | {chunk.unit_title} | "
             f"{chunk.document_title} | pages {chunk.page_range}"
+        )
+        print(
+            f"           dense#{chunk.dense_rank} ft#{chunk.fulltext_rank} "
+            f"graph#{chunk.graph_rank} | licence={chunk.licence} | "
+            f"cisce={', '.join(chunk.cisce_outcome_ids) or '(none)'}"
         )
         print(f"           section: {chunk.section_title}")
         print(f"           {chunk.preview(100)}")
@@ -99,6 +105,14 @@ def print_provenance(result: RagResult) -> None:
             f"        document={source['document_title']} pages={source['pages']} "
             f"section={source['section_title']}"
         )
+        print(
+            f"        source={source.get('source_id')} role={source.get('source_role')} "
+            f"licence={source.get('licence')}"
+        )
+        print(
+            f"        cisce={source.get('cisce_outcome_ids')} "
+            f"alignment={source.get('alignment_status')}"
+        )
         print(f"        pdf={source['local_pdf_path']}")
         print(f"        chunk={source['chunk_id']}")
 
@@ -106,7 +120,7 @@ def print_provenance(result: RagResult) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-q", "--query", help="Student question. Omit to be prompted.")
-    parser.add_argument("-g", "--grade", type=int, help="Student grade, e.g. 2")
+    parser.add_argument("-g", "--grade", type=int, help="Student grade, e.g. 3")
     parser.add_argument("-s", "--subject", help="science | mathematics")
     parser.add_argument("-u", "--unit", help="Restrict to a unit id")
     parser.add_argument(

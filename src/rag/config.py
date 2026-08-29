@@ -200,7 +200,8 @@ class EvidenceConfig:
     to replace this component with a stronger grounding check later.
     """
 
-    # bge-reranker-v2-m3 emits an unbounded logit; >0 corresponds to sigmoid>0.5.
+    # Raw bge-reranker-v2-m3 logit. 0.0 is sigmoid(0)=0.5, not "no relevance".
+    # Keep this floor unless a reviewed calibration set shows a better cut-point.
     min_rerank_score: float = 0.0
     min_chunks: int = 1
     # How many chunks must clear min_rerank_score.
@@ -288,13 +289,13 @@ class PathConfig:
     @classmethod
     def from_env(cls) -> "PathConfig":
         return cls(
-            corpus_path=_env_path("CORPUS_PATH", "core_knowledge_stem"),
-            processed_data_path=_env_path("PROCESSED_DATA_PATH", "data/processed"),
+            corpus_path=_env_path("CORPUS_PATH", "curriculum"),
+            processed_data_path=_env_path("PROCESSED_DATA_PATH", "curriculum/processed"),
         )
 
     @property
     def manifest_path(self) -> Path:
-        return self.corpus_path / "manifest.json"
+        return self.corpus_path / "manifests" / "sources.yaml"
 
     @property
     def text_dir(self) -> Path:
@@ -336,11 +337,11 @@ class IngestConfig:
     # Heading-delimited sections shorter than this are merged into the preceding
     # section. These PDFs use many short sub-headings, and taking every one as a
     # section boundary yields chunks far below the configured token target.
-    min_section_chars: int = 1500
+    min_section_chars: int = 400
     # Embedded images below this pixel area are decorative (rules, bullets, logos).
     min_image_pixels: int = 100 * 100
     extract_images: bool = True
-    # OCR is off by default: the Core Knowledge PDFs are digitally generated.
+    # OCR is off by default: the approved STEM PDFs/ePUBs have a text layer.
     # Pages with no extractable text are recorded as image-only rather than OCRed.
     enable_ocr: bool = False
     neo4j_batch_size: int = 200
@@ -349,7 +350,7 @@ class IngestConfig:
     def from_env(cls) -> "IngestConfig":
         return cls(
             min_page_chars=_env_int("INGEST_MIN_PAGE_CHARS", 40),
-            min_section_chars=_env_int("INGEST_MIN_SECTION_CHARS", 1500),
+            min_section_chars=_env_int("INGEST_MIN_SECTION_CHARS", 400),
             min_image_pixels=_env_int("INGEST_MIN_IMAGE_PIXELS", 10_000),
             extract_images=_env_bool("INGEST_EXTRACT_IMAGES", True),
             enable_ocr=_env_bool("INGEST_ENABLE_OCR", False),

@@ -1,8 +1,9 @@
 # SIH STEM RAG
 
 Local research project building a **hallucination-resistant Socratic STEM tutor**
-over Core Knowledge Foundation curriculum materials (Grades 1–3 Mathematics and
-Science).
+over a CISCE-aligned Grade 3–5 STEM corpus (EngageNY Mathematics, Siyavula
+Natural Sciences, and Utah Science OER). CISCE is used only as an alignment
+authority and is never ingested.
 
 The system implements hybrid GraphRAG retrieval on a local Neo4j instance, feeding a
 locally hosted Qwen3-VL-8B-Instruct generator that is instructed to tutor rather
@@ -10,6 +11,7 @@ than to answer outright.
 
 ## Contents
 
+- [Complete setup and run](#complete-setup-and-run)
 - [First-time local setup](#first-time-local-setup)
 - [What is gitignored and how to restore it](#what-is-gitignored-and-how-to-restore-it)
 - [Architecture](#architecture)
@@ -22,12 +24,135 @@ than to answer outright.
 - [Evidence sufficiency gate](#evidence-sufficiency-gate)
 - [Socratic controller](#socratic-controller)
 - [Commands](#commands)
+- [Local observability dashboard](#local-observability-dashboard)
 - [Configuration](#configuration)
 - [Evaluation](#evaluation)
 - [Tests](#tests)
 - [Project structure](#project-structure)
 - [Current limitations](#current-limitations)
 - [Future experimental directions](#future-experimental-directions)
+
+## Complete setup and run
+
+Follow these commands in order from a fresh clone. Everything is local: Neo4j
+under `.neo4j-local/`, models under `models/`, and the dashboard on
+`127.0.0.1`. Use the active Python 3.12 environment. Node.js is required only
+for the dashboard (check with `node --version` and `npm --version`).
+
+### 1. Python packages
+
+```bash
+pip install -r requirements.txt
+```
+
+This installs the existing RAG stack plus the visualizer API (`fastapi`,
+`uvicorn`, `httpx`) and `pytest`.
+
+### 2. Environment file
+
+```bash
+cp .env.example .env
+```
+
+Set `NEO4J_PASSWORD` in `.env` to a real password (not `change-me`).
+
+### 3. Curriculum PDFs
+
+EngageNY Grade 3–5 Mathematics **must be downloaded by hand** (NYSED SharePoint
+requires a Microsoft login). Then run the automated downloader for Siyavula,
+Utah, and the CISCE alignment PDF. See [Dataset](#dataset).
+
+```bash
+python scripts/download_curriculum.py
+```
+
+### 4. Models
+
+```bash
+python scripts/download_retrieval_models.py
+huggingface-cli download Qwen/Qwen3-VL-8B-Instruct \
+    --local-dir models/qwen3-vl-8b-instruct
+```
+
+### 5. Neo4j (tarball under `.neo4j-local/` only)
+
+If `.neo4j-local/` is not already provisioned, follow [Neo4j setup](#neo4j-setup)
+(download the Neo4j Community and Temurin JDK 21 tarballs, extract them, then
+set the password). Then:
+
+```bash
+./scripts/neo4j_local.sh set-password "<same-as-NEO4J_PASSWORD-in-.env>"
+./scripts/neo4j_local.sh start
+python scripts/init_neo4j.py
+python scripts/ingest_corpus.py
+```
+
+Skip `set-password` if the database already has this password. Re-running
+`ingest_corpus.py` is idempotent.
+
+### 6. Dashboard frontend
+
+```bash
+cd frontend
+npm install
+npm run build
+cd ..
+```
+
+`npm install` fills gitignored `frontend/node_modules/` from the committed
+`frontend/package-lock.json`. `npm run build` writes gitignored `frontend/dist/`.
+Do not install npm packages globally.
+
+### 7. Run the visualizer
+
+```bash
+python scripts/run_visualizer.py
+```
+
+The browser opens `http://127.0.0.1:8000`. Submit a query such as
+`how does weather change` with grade `3` and
+subject `science`. Use retrieval-only first if you do not want to load Qwen.
+
+Optional launcher flags: `--host`, `--port`, `--reload`, `--no-browser`.
+
+Frontend hot-reload (API still on port 8000):
+
+```bash
+python scripts/run_visualizer.py --no-browser
+# in another terminal:
+cd frontend
+npm run dev
+```
+
+Then open `http://127.0.0.1:5173`.
+
+### 8. CLI pipeline (without the dashboard)
+
+Neo4j must still be running (`./scripts/neo4j_local.sh start`).
+
+```bash
+python scripts/test_retriever.py \
+    --query "what is a unit fraction" \
+    --grade 3 --subject mathematics
+
+python scripts/test_rag.py \
+    --query "how does weather change" \
+    --grade 3 --subject science
+
+python scripts/test_rag.py \
+    --query "how do plants make food" \
+    --grade 4 --subject science --retrieval-only
+```
+
+### 9. Tests
+
+```bash
+python -m pytest tests/ -q
+cd frontend
+npm test -- --run
+```
+
+Integration tests skip (they do not fail) when Neo4j or local models are missing.
 
 ## First-time local setup
 
@@ -42,8 +167,6 @@ Neo4j (more during ingestion).
 ### 1. Python environment
 
 ```bash
-python -m venv .venv          # optional; .venv/ is git-ignored
-source .venv/bin/activate     # omit if not using a venv
 pip install -r requirements.txt
 ```
 
@@ -56,13 +179,37 @@ cp .env.example .env
 Edit `.env` and set `NEO4J_PASSWORD` to a real password. The same value is used by
 Neo4j and by every script that connects to the database.
 
-### 3. Curriculum PDFs (~935 MB)
+### 3. Curriculum sources
 
-```bash
-python scripts/download_core_knowledge_stem.py
+EngageNY Mathematics Grade 3–5 full-module PDFs **cannot be fetched by the
+automated downloader**. NYSED hosts them behind SharePoint (Microsoft login).
+Placing those 20 PDFs is a required setup step, not optional.
+
+1. Open an official NYSED page and sign in if prompted:
+   - https://www.nysed.gov/edtech/digital-content-resources-mathematics
+   - https://www.nysed.gov/standards-instruction/standards-resources-and-supports
+   - SharePoint folder: https://nysed.sharepoint.com/:f:/s/P12EngageNY-Math-EXTA/En7SIs8H6v5PlQbP8fYWQbkBvFl7pdadxm5WQe2RYn6C_Q?e=aA13JQ
+2. Download Grade 3, Grade 4 and Grade 5 Mathematics. Keep only
+   `math-gN-mN-full-module.pdf` (20 files: G3 M1–7, G4 M1–7, G5 M1–6). Skip
+   assessments, answer keys, lesson zips and Internet Archive copies.
+3. Copy each PDF to the catalog path, for example:
+
+```
+curriculum/raw/engageny/mathematics/grade_03/module_01_properties_of_multiplication_and_division/student/math-g3-m1-full-module.pdf
 ```
 
-Output: `core_knowledge_stem/` (git-ignored). Details in [Dataset](#dataset).
+Expected filenames are `math-g{3,4,5}-m{1…}-full-module.pdf` under the matching
+`grade_XX/module_…/student/` directory listed in
+`src/rag/curriculum_catalog.py`.
+
+4. Then fetch everything the script *can* download (Siyavula, Utah, CISCE
+   alignment PDF). Existing valid files are skipped:
+
+```bash
+python scripts/download_curriculum.py
+```
+
+Output: `curriculum/raw/` (git-ignored). Details in [Dataset](#dataset).
 
 ### 4. Retrieval models (~4.6 GB total)
 
@@ -113,7 +260,7 @@ git-ignored and **safe to delete after extraction** to save disk.
 
 ```bash
 python scripts/init_neo4j.py
-python scripts/ingest_corpus.py    # ~8 minutes for all 126 PDFs
+python scripts/ingest_corpus.py    # ~8 minutes for 25 catalog files
 ```
 
 Ingestion writes git-ignored artefacts under `data/processed/` (images,
@@ -124,12 +271,12 @@ manifests, cache) and populates Neo4j. Re-running is idempotent unless you pass
 
 ```bash
 python scripts/test_retriever.py \
-    --query "why does the moon look different on different nights" \
-    --grade 1 --subject science
+    --query "what is a unit fraction" \
+    --grade 3 --subject mathematics
 
 python scripts/test_rag.py \
-    --query "why does the moon look different on different nights" \
-    --grade 1 --subject science
+    --query "how does weather change" \
+    --grade 3 --subject science
 
 python scripts/test_generator.py
 python -m pytest tests/ -q
@@ -145,18 +292,23 @@ or use the table below to restore individual pieces.
 
 | Gitignored path | How to recreate | Size (approx.) |
 |-----------------|-----------------|----------------|
-| `core_knowledge_stem/` | `python scripts/download_core_knowledge_stem.py` | ~935 MB |
+| `curriculum/raw/` | Manual EngageNY full-module PDFs (see [Dataset](#dataset)), then `python scripts/download_curriculum.py` | several hundred MB |
 | `models/bge-m3/` | `python scripts/download_retrieval_models.py` | ~2.3 GB |
 | `models/bge-reranker-v2-m3/` | same script | ~2.3 GB |
 | `models/qwen3-vl-8b-instruct/` | `huggingface-cli download Qwen/Qwen3-VL-8B-Instruct --local-dir models/qwen3-vl-8b-instruct` | ~17 GB |
 | `.neo4j-local/` | [Neo4j setup](#neo4j-setup): download Neo4j + JDK tarballs, extract, then `./scripts/neo4j_local.sh set-password` and `start` | ~500 MB install + DB grows with ingest |
 | `.neo4j-local/*.tar.gz` | re-download the Neo4j/JDK tarballs from the URLs in [Neo4j setup](#neo4j-setup) | ~330 MB |
-| `data/processed/` | `python scripts/ingest_corpus.py` | ~800 MB (mostly images) |
+| `curriculum/processed/` | `python scripts/ingest_corpus.py` | grows with ingest |
 | `.env` | `cp .env.example .env` and set `NEO4J_PASSWORD` | — |
 | `data/evaluation/retrieval_questions.jsonl` | hand-label per [Evaluation](#evaluation) | — |
 | `.pytest_cache/`, `.ruff_cache/`, `__pycache__/`, `*.log` | recreated automatically by tools / re-running commands | negligible |
+| `frontend/node_modules/` | `cd frontend && npm install` | depends on lockfile |
+| `frontend/dist/` | `cd frontend && npm run build` | small |
+| `frontend/.vite/`, `frontend/.pytest_cache/`, `frontend/coverage/` | recreated by Vite / accidental pytest in `frontend/` | negligible |
+| `.tools/` | optional local Node.js LTS archive if system Node is unavailable | ~50 MB |
 
-**Still committed:** source code, `scripts/`, `tests/`, `.env.example`,
+**Still committed:** source code, `scripts/`, `tests/`, `frontend/` (except
+`node_modules/` and `dist/`), `.env.example`,
 `data/evaluation/README.md`, and `data/evaluation/retrieval_questions.example.jsonl`.
 
 **If you wipe Neo4j data** (delete `.neo4j-local/neo4j-community-*/data/`),
@@ -165,7 +317,7 @@ re-run `init_neo4j.py` and `ingest_corpus.py`. The graph is not stored in git.
 ## Architecture
 
 ```
-Core Knowledge PDFs
+Approved STEM sources (PDF/ePUB)
         |
    PyMuPDF structured parsing  (text, headings, embedded images, page geometry)
         |
@@ -215,62 +367,93 @@ The curriculum downloader itself needs no third-party packages.
 
 ## Dataset
 
-Curriculum PDFs come from the Core Knowledge Foundation:
+Supported grades are **3, 4 and 5 only**. CISCE is the alignment authority and is
+**not ingested**, embedded, or retrieved.
 
-<https://www.coreknowledge.org/download-free-curriculum/>
+| Source | Grades | Subject | Role | Licence |
+| ------ | -----: | ------- | ---- | ------- |
+| CISCE Primary Curriculum | 3–5 | Mathematics and Science | Alignment only | CISCE terms; PDF not in Neo4j |
+| EngageNY Mathematics | 3–5 | Mathematics | Primary | CC BY-NC-SA |
+| Siyavula Natural Sciences (learner ePUB, CC-BY) | 4–5 | Science | Primary | CC BY |
+| Utah Science OER | 3 | Science | Primary | Mixed OER notices (may include noncommercial terms) |
+| Utah Science OER | 4–5 | Science | Support | Mixed OER notices (may include noncommercial terms) |
 
-- Grade 1 Mathematics and Science
-- Grade 2 Mathematics and Science
-- Grade 3 Mathematics and Science
-
-A full run downloads **51 units** and **126 PDFs** (~935 MB).
+Grade 3 Science uses Utah OER as primary because Siyavula begins at Grade 4.
+EngageNY teacher solutions and answer keys are classified `evaluation_only` and
+never enter production retrieval. Noncommercial restrictions apply to EngageNY
+and may apply to portions of Utah content.
 
 ### Run the downloader
 
 ```bash
-python scripts/download_core_knowledge_stem.py
+python scripts/download_curriculum.py
 ```
 
-Optional log:
+Only the URLs in `src/rag/curriculum_catalog.py` are used. There is no login and
+no mirror fallback. Valid files are skipped on re-run. SHA-256 hashes are
+written to `curriculum/manifests/sources.yaml` and
+`curriculum/manifests/checksums.sha256`.
+
+**EngageNY must be downloaded manually.** NYSED public pages point at a
+SharePoint folder that requires a Microsoft login, so
+`scripts/download_curriculum.py` will not retrieve those PDFs. If the 20
+full-module files are already in `curriculum/raw/engageny/`, the script skips
+them. If they are missing, it tells you where to put them.
+
+Required files (CC BY-NC-SA; local research only):
+
+| Grade | Modules | Filename pattern |
+| ----- | ------: | ---------------- |
+| 3 | 1–7 | `math-g3-mN-full-module.pdf` |
+| 4 | 1–7 | `math-g4-mN-full-module.pdf` |
+| 5 | 1–6 | `math-g5-mN-full-module.pdf` |
+
+Official starting pages:
+
+- https://www.nysed.gov/edtech/digital-content-resources-mathematics
+- https://www.nysed.gov/standards-instruction/standards-resources-and-supports
+- https://www.nysed.gov/curriculum-instruction/engageny
+- SharePoint: https://nysed.sharepoint.com/:f:/s/P12EngageNY-Math-EXTA/En7SIs8H6v5PlQbP8fYWQbkBvFl7pdadxm5WQe2RYn6C_Q?e=aA13JQ
+
+Do not use Internet Archive or other unofficial mirrors. After copying the PDFs
+into the catalog paths, re-run the downloader (to record hashes) and ingest:
 
 ```bash
-python scripts/download_core_knowledge_stem.py 2>&1 | tee download.log
+python scripts/download_curriculum.py
+python scripts/ingest_corpus.py
 ```
 
-### What it does
-
-1. Crawls the official curriculum listing for Grades 1–3 Mathematics and Science.
-2. Visits each unit page and downloads every resource with a **Download Free PDF
-   Version** link.
-3. Saves files under `core_knowledge_stem/` using this layout:
+Layout:
 
 ```
-core_knowledge_stem/
-├── grade_01/
-│   ├── mathematics/
-│   └── science/
-├── grade_02/
-├── grade_03/
-└── manifest.json
+curriculum/
+├── manifests/sources.yaml
+├── alignment/cisce_grade_3_5_stem.yaml
+├── raw/          git-ignored downloads
+└── processed/    git-ignored ingest artefacts
 ```
 
-Each unit folder contains `student/`, `teacher/` and `other/` subdirectories
-based on resource type.
+The CISCE PDF is stored under `curriculum/raw/_alignment_only/` for local
+alignment authoring and is never ingested.
 
-4. Writes `core_knowledge_stem/manifest.json` with metadata for every PDF.
-5. Re-crawls the site and verifies all expected units and PDFs exist locally.
+### Replace the old graph, then ingest
 
-The script skips PDFs that already exist, so it is safe to re-run after an
-interruption.
+```bash
+python scripts/replace_corpus.py --purge-core-knowledge --yes
+python scripts/replace_corpus.py --purge-all-curriculum --yes   # explicit full wipe
+python scripts/ingest_corpus.py
+```
+
+Ordinary ingestion does not delete the graph.
 
 ### Important notes
 
-- Materials are for **local research use only** and must not be redistributed.
-- Only official Core Knowledge Foundation URLs are used; no login or paid
-  resources are accessed.
-- Raw PDFs are never modified. Ingestion writes derived artefacts to
-  `data/processed/` and leaves `core_knowledge_stem/` untouched.
-- Downloaded data is excluded from git via `.gitignore`.
+- Materials are for **local research use only**.
+- EngageNY is CC BY-NC-SA; do not use it commercially.
+- Utah textbooks mix CK-12 and other notices; images without a clear licence
+  are skipped.
+- Siyavula learner ePUBs are CC BY; branded ND PDFs are not used.
+- All CISCE mappings are `needs_human_review` until a reviewer signs them.
 
 ## Models
 
@@ -454,9 +637,9 @@ of grounding the tutor in verified curriculum.
 All IDs are deterministic, which is what makes ingestion idempotent:
 
 ```
-grade_id    grade_01
-subject_id  grade_01:science
-unit_id     grade_01:science:unit_01_sun_moon_and_stars
+grade_id    grade_03
+subject_id  grade_03:science
+unit_id     grade_03:science:unit_01_science_oer
 document_id <unit_id>:student:student_reader
 page_id     <document_id>:p0007
 section_id  <document_id>:s0003
@@ -530,7 +713,7 @@ is preserved.
 ### 1. Metadata filtering
 
 ```python
-retriever.retrieve("why does the moon change shape", grade=1, subject="science")
+retriever.retrieve("what is a unit fraction", grade=3, subject="mathematics")
 ```
 
 `grade`, `subject`, `unit`, `resource_type`, `audience` and `document_id` are
@@ -640,7 +823,20 @@ fabricated.
 
 Run all commands from the repository root.
 
-### 1. Download the retrieval models
+### 1. Download curriculum sources
+
+EngageNY Grade 3–5 full-module PDFs must be copied in by hand first (SharePoint
+login). Paths and official pages are in [Dataset](#dataset). Then:
+
+```bash
+python scripts/download_curriculum.py
+```
+
+Fetches Siyavula, Utah, and the CISCE alignment PDF. Existing valid files,
+including local EngageNY PDFs, are skipped. If EngageNY files are missing, the
+script prints the expected destination paths and exits with an error.
+
+### 2. Download the retrieval models
 
 ```bash
 python scripts/download_retrieval_models.py
@@ -653,7 +849,7 @@ models are skipped and reported in a status table at the end. Never touches
 Qwen3-VL. Flags: `--model` (`bge-m3` or `bge-reranker-v2-m3`, repeatable),
 `--force` (re-download even when complete).
 
-### 2. Start Neo4j
+### 3. Start Neo4j
 
 Requires a provisioned `.neo4j-local/` (see [Neo4j setup](#neo4j-setup)).
 
@@ -661,7 +857,7 @@ Requires a provisioned `.neo4j-local/` (see [Neo4j setup](#neo4j-setup)).
 ./scripts/neo4j_local.sh start
 ```
 
-### 3. Initialise the schema
+### 4. Initialise the schema
 
 ```bash
 python scripts/init_neo4j.py
@@ -672,7 +868,7 @@ BGE-M3) and the full-text indexes. Idempotent. Flags: `--show` (report schema an
 counts only), `--reset` (delete all nodes; prompts unless `--yes`), `--drop-indexes`
 (with `--reset`, also drop indexes).
 
-### 4. Ingest the corpus
+### 5. Ingest the corpus
 
 ```bash
 python scripts/ingest_corpus.py
@@ -683,7 +879,7 @@ generates embeddings and links concepts. Safe and idempotent by default:
 up-to-date documents are skipped, so an interrupted run resumes.
 
 ```bash
-python scripts/ingest_corpus.py --grade 1 --subject science   # subset
+    python scripts/ingest_corpus.py --grade 3 --subject science   # subset
 python scripts/ingest_corpus.py --limit 5                     # smoke test
 python scripts/ingest_corpus.py --force                       # re-process all
 python scripts/ingest_corpus.py --skip-embeddings             # graph only
@@ -692,21 +888,21 @@ python scripts/ingest_corpus.py --reset                       # destructive, pro
 python scripts/ingest_corpus.py --reset --yes                 # skip prompt
 ```
 
-### 5. Inspect the graph
+### 6. Inspect the graph
 
 ```bash
 python scripts/inspect_graph.py
 python scripts/inspect_graph.py --units
-python scripts/inspect_graph.py --unit grade_01:science:unit_01_sun_moon_and_stars
+python scripts/inspect_graph.py --unit grade_03:science:unit_01_science_oer
 python scripts/inspect_graph.py --chunk "<chunk_id>"
 python scripts/inspect_graph.py --concepts 30
 python scripts/inspect_graph.py --images 10
 ```
 
-### 6. Test retrieval (no generator)
+### 7. Test retrieval (no generator)
 
 ```bash
-python scripts/test_retriever.py --query "why does the moon change shape" --grade 1 --subject science
+python scripts/test_retriever.py --query "what is a unit fraction" --grade 3 --subject mathematics
 ```
 
 Prints dense, full-text, graph, fused and reranked results side by side with per
@@ -715,13 +911,13 @@ the generator. Useful flags: `-q`/`--query`, `-g`/`--grade`, `-s`/`--subject`,
 `-u`/`--unit`, `--resource-type`, `--audience`, `--limit`, `--final-top-k`,
 `--no-rerank`, `--images`, `--json`.
 
-### 7. Test the full RAG pipeline
+### 8. Test the full RAG pipeline
 
 ```bash
-python scripts/test_rag.py --query "why does the moon look different on different nights" --grade 1 --subject science
-python scripts/test_rag.py --query "why does the moon look different on different nights" --grade 1 --subject science --state GIVE_HINT
-python scripts/test_rag.py --query "what is a black hole" --grade 1 --subject science --strict
-python scripts/test_rag.py --query "measuring length" --grade 2 --subject mathematics --retrieval-only
+python scripts/test_rag.py --query "how does weather change" --grade 3 --subject science
+python scripts/test_rag.py --query "how does weather change" --grade 3 --subject science --state GIVE_HINT
+python scripts/test_rag.py --query "what is a unit fraction" --grade 3 --subject mathematics --strict
+python scripts/test_rag.py --query "how do I find the area of a rectangle" --grade 3 --subject mathematics --retrieval-only
 ```
 
 Runs filtering, all three channels, fusion, reranking and the evidence gate,
@@ -736,7 +932,7 @@ Omit `-q`/`--query` (and optionally `-g`/`-s`) to be prompted interactively.
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `-q`, `--query` | *(prompt)* | Student question |
-| `-g`, `--grade` | any | Grade filter (`1`, `2`, or `3`) |
+| `-g`, `--grade` | any | Grade filter (`3`, `4`, or `5`) |
 | `-s`, `--subject` | any | `science` or `mathematics` |
 | `-u`, `--unit` | any | Restrict retrieval to one unit id |
 | `--state` | `ASK_QUESTION` | Tutoring move (see table below) |
@@ -764,13 +960,13 @@ is Socratic.
 valid `--state` value. With `--strict`, generation is skipped instead of running
 in that state.
 
-### 8. Generator sanity check (pre-existing)
+### 9. Generator sanity check (pre-existing)
 
 ```bash
 python scripts/test_generator.py
 ```
 
-### 9. Evaluate retrieval (needs manual labels)
+### 10. Evaluate retrieval (needs manual labels)
 
 ```bash
 python scripts/evaluate_retrieval.py --per-question
@@ -780,6 +976,57 @@ python scripts/evaluate_retrieval.py --no-rerank --json report.json
 
 Flags: `--questions`, `--k`, `--no-rerank`, `--per-question`, `--json`.
 
+## Local observability dashboard
+
+A local browser dashboard shows how one query moves through retrieval, fusion,
+reranking, the evidence gate, the Socratic prompt and generation. Graph expansion
+includes nodes that were examined and then ignored, with machine-readable reason
+codes. Tracing is optional: the CLI pipeline is unchanged when no observer is
+attached, and diagnostic graph queries run only while the dashboard is tracing a
+run.
+
+Everything stays on this machine. The server binds to `127.0.0.1` by default.
+There is no cloud service, CDN, telemetry, or analytics.
+
+### Setup and launch
+
+From the repository root, using the active Python environment:
+
+```bash
+pip install -r requirements.txt
+cd frontend
+npm install
+npm run build
+cd ..
+python scripts/run_visualizer.py
+```
+
+The launcher opens `http://127.0.0.1:8000` unless you pass `--no-browser`.
+Optional flags: `--host`, `--port`, `--reload`, `--no-browser`. If
+`frontend/dist/` is missing, the script prints the build commands above and
+exits without starting a server.
+
+Frontend packages stay in `frontend/node_modules/`. Do not install npm packages
+globally.
+
+### Frontend development
+
+Run the API and the Vite dev server separately. Vite proxies `/api` to port 8000
+and is allowed only from the local origin.
+
+```bash
+python scripts/run_visualizer.py --no-browser
+```
+
+In another terminal:
+
+```bash
+cd frontend
+npm run dev
+```
+
+Then open `http://127.0.0.1:5173`.
+
 ## Configuration
 
 All tunables live in `src/rag/config.py` and are overridable via environment
@@ -787,8 +1034,8 @@ variables or `.env`. There are no magic numbers scattered through the code.
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `CORPUS_PATH` | `core_knowledge_stem` | Raw PDF corpus root |
-| `PROCESSED_DATA_PATH` | `data/processed` | Derived artefacts |
+| `CORPUS_PATH` | `curriculum` | Curriculum root (raw + manifests) |
+| `PROCESSED_DATA_PATH` | `curriculum/processed` | Derived artefacts |
 | `EMBEDDING_MODEL_PATH` | `models/bge-m3` | BGE-M3 directory |
 | `RERANKER_MODEL_PATH` | `models/bge-reranker-v2-m3` | Reranker directory |
 | `GENERATOR_MODEL_PATH` | `models/qwen3-vl-8b-instruct` | Qwen3-VL directory |
@@ -843,6 +1090,7 @@ never scored as zero.
 
 ```bash
 python -m pytest tests/ -q
+cd frontend && npm test -- --run
 ```
 
 | File | Scope | Needs Neo4j? |
@@ -850,6 +1098,9 @@ python -m pytest tests/ -q
 | `tests/test_chunking.py` | hierarchy, overlap, token budgets, deterministic IDs | no |
 | `tests/test_metadata.py` | ID scheme, filter → Cypher translation, concept normalisation | no |
 | `tests/test_fusion.py` | RRF arithmetic, dedup, weighting, signal preservation | no |
+| `tests/test_trace.py` | trace models, observer events, fusion/rerank/evidence/prompt | no |
+| `tests/test_graph_trace.py` | ignored-node reason codes, diagnostic classification | no |
+| `tests/test_visualizer_api.py` | FastAPI health, runs, SSE (fake pipeline) | no |
 | `tests/test_retrieval.py` | live channels, metadata isolation, traceability | yes (skips if absent) |
 
 `tests/test_retrieval.py` skips rather than fails when Neo4j, an ingested corpus
@@ -885,9 +1136,14 @@ sih-stem-rag/
 │       ├── evidence.py         evidence sufficiency gate
 │       ├── socratic.py         tutoring controller and prompts
 │       ├── generator.py        Qwen3-VL wrapper with streaming
-│       └── pipeline.py         HybridRetriever + SocraticRagPipeline
+│       ├── pipeline.py         HybridRetriever + SocraticRagPipeline
+│       ├── trace.py            optional run/stage trace models
+│       └── graph_trace.py      bounded ignored-node graph diagnostics
+│   └── rag_visualizer/         FastAPI dashboard (SSE, in-memory runs)
+├── frontend/                   React + Vite + Cytoscape dashboard
 ├── scripts/
-│   ├── download_core_knowledge_stem.py
+│   ├── download_curriculum.py
+│   ├── replace_corpus.py
 │   ├── download_retrieval_models.py
 │   ├── neo4j_local.sh
 │   ├── init_neo4j.py
@@ -896,17 +1152,16 @@ sih-stem-rag/
 │   ├── test_retriever.py
 │   ├── test_rag.py
 │   ├── test_generator.py
-│   └── evaluate_retrieval.py
+│   ├── evaluate_retrieval.py
+│   └── run_visualizer.py
 ├── tests/
-├── data/
-│   ├── processed/              text/, images/, manifests/, cache/  (git-ignored)
-│   └── evaluation/             JSONL schema + labelling guide
+├── curriculum/                manifests + alignment committed; raw/ processed git-ignored
 ├── models/                     git-ignored
 │   ├── qwen3-vl-8b-instruct/
 │   ├── bge-m3/
 │   └── bge-reranker-v2-m3/
 ├── .neo4j-local/               git-ignored Neo4j tarball + JDK 21 + DB data
-└── core_knowledge_stem/        git-ignored raw PDFs
+├── data/evaluation/          JSONL schema + labelling guide
 ```
 
 There is no `docker-compose.yml`. Neo4j is started with `scripts/neo4j_local.sh`

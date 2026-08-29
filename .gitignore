@@ -4,9 +4,15 @@
 #   What is gitignored and how to restore it
 # =============================================================================
 
-# --- Curriculum PDFs (reproducible) ------------------------------------------
-# Restore: python scripts/download_core_knowledge_stem.py
+# --- Curriculum sources (reproducible) -----------------------------------
+# Restore: python scripts/download_curriculum.py
+# CISCE PDF is downloaded only for alignment authoring and is never ingested.
+curriculum/raw/
+curriculum/processed/
 core_knowledge_stem/
+
+# OneDrive/SharePoint exports dropped in the repo root (not ingested as zips)
+OneDrive_*.zip
 
 # --- Model weights (reproducible) --------------------------------------------
 # Restore: python scripts/download_retrieval_models.py
@@ -61,6 +67,22 @@ build/
 .venv/
 venv/
 ENV/
+
+# --- Frontend (visualizer; reproducible from package-lock.json) -------------
+# Restore: cd frontend && npm install && npm run build
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.pytest_cache/
+frontend/coverage/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- Optional local Node.js LTS (only if system Node is unavailable) ---------
+# Restore: unpack an official Node.js LTS tarball here; do not install Node system-wide
+.tools/
 
 # --- Editor / OS -------------------------------------------------------------
 .DS_Store

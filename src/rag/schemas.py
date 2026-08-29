@@ -5,9 +5,9 @@ Identifier scheme
 All identifiers are deterministic and derived from the corpus layout, so
 re-running ingestion upserts the same nodes instead of duplicating them::
 
-    grade_id    grade_01
-    subject_id  grade_01:science
-    unit_id     grade_01:science:unit_02_plant_and_animal_survival
+    grade_id    grade_03
+    subject_id  grade_03:science
+    unit_id     grade_03:science:unit_01_science_oer
     document_id <unit_id>:student:student_book
     page_id     <document_id>:p0007
     section_id  <document_id>:s0003
@@ -83,8 +83,8 @@ def concept_id_for(normalized_name: str) -> str:
 class DocumentMetadata:
     """Everything known about a source PDF before it is parsed.
 
-    Fields come from `core_knowledge_stem/manifest.json` where available and are
-    otherwise derived from the on-disk directory layout.
+    Fields come from the committed source catalog (``curriculum/manifests``)
+    together with the on-disk file under ``curriculum/raw/``.
     """
 
     document_id: str
@@ -108,10 +108,22 @@ class DocumentMetadata:
     # "student" | "teacher" | "other" (from the directory layout).
     audience: str
 
-    # Provenance from the manifest; never fabricated.
+    # Provenance from the catalog; never fabricated.
     unit_page_url: str | None = None
     pdf_url: str | None = None
     from_manifest: bool = False
+    source_id: str = ""
+    publisher: str = ""
+    source_role: str = "primary"
+    licence: str = ""
+    licence_url: str = ""
+    source_url: str = ""
+    content_partition: str = "student_evidence"
+    cisce_outcome_ids: tuple[str, ...] = ()
+    alignment_status: str = "needs_human_review"
+    file_format: str = "pdf"
+    extract_images: bool = False
+    file_id: str = ""
 
     def as_chunk_properties(self) -> dict[str, Any]:
         """Metadata copied onto every Chunk node for first-class filtering."""
@@ -125,6 +137,15 @@ class DocumentMetadata:
             "resource_type": self.resource_type,
             "audience": self.audience,
             "local_pdf_path": str(self.local_pdf_path),
+            "source_id": self.source_id,
+            "publisher": self.publisher,
+            "source_role": self.source_role,
+            "licence": self.licence,
+            "licence_url": self.licence_url,
+            "source_url": self.source_url,
+            "content_partition": self.content_partition,
+            "cisce_outcome_ids": list(self.cisce_outcome_ids),
+            "alignment_status": self.alignment_status,
         }
 
 
@@ -149,6 +170,11 @@ class ParsedImage:
     image_format: str
     # PDF xref of the embedded image, useful for tracing back into the PDF.
     xref: int | None = None
+    creator: str = ""
+    licence: str = ""
+    licence_url: str = ""
+    attribution: str = ""
+    source_href: str = ""
 
     def to_properties(self) -> dict[str, Any]:
         return {
@@ -164,6 +190,11 @@ class ParsedImage:
             "height": self.height,
             "format": self.image_format,
             "xref": self.xref,
+            "creator": self.creator,
+            "licence": self.licence,
+            "licence_url": self.licence_url,
+            "attribution": self.attribution,
+            "source_href": self.source_href,
         }
 
 
@@ -206,6 +237,8 @@ class ParsedPage:
     images: list[ParsedImage] = field(default_factory=list)
     # True when the page has no usable text layer (likely a scan or full-page art).
     image_only: bool = False
+    page_role: str = "curriculum"  # curriculum | front_matter | credits | image_only
+    skip_reason: str = ""
 
     def to_properties(self, document: DocumentMetadata) -> dict[str, Any]:
         return {
@@ -216,6 +249,9 @@ class ParsedPage:
             "width": self.width,
             "height": self.height,
             "has_extractable_text": self.has_extractable_text,
+            "image_only": self.image_only,
+            "page_role": self.page_role,
+            "skip_reason": self.skip_reason,
             "image_only": self.image_only,
             "document_id": document.document_id,
             "grade": document.grade,
@@ -311,6 +347,16 @@ class Chunk:
     resource_type: str
     audience: str
     local_pdf_path: str
+    source_id: str = ""
+    publisher: str = ""
+    source_role: str = "primary"
+    licence: str = ""
+    licence_url: str = ""
+    source_url: str = ""
+    content_partition: str = "student_evidence"
+    cisce_outcome_ids: list[str] = field(default_factory=list)
+    alignment_status: str = "needs_human_review"
+    mapping_granularity: str = "unit"
 
     concepts: list[str] = field(default_factory=list)
 
@@ -336,6 +382,16 @@ class Chunk:
             "resource_type": self.resource_type,
             "audience": self.audience,
             "local_pdf_path": self.local_pdf_path,
+            "source_id": self.source_id,
+            "publisher": self.publisher,
+            "source_role": self.source_role,
+            "licence": self.licence,
+            "licence_url": self.licence_url,
+            "source_url": self.source_url,
+            "content_partition": self.content_partition,
+            "cisce_outcome_ids": list(self.cisce_outcome_ids),
+            "alignment_status": self.alignment_status,
+            "mapping_granularity": self.mapping_granularity,
         }
 
 
@@ -381,6 +437,8 @@ class RetrievalFilter:
     resource_type: str | None = None
     audience: str | None = None
     document_id: str | None = None
+    include_evaluation: bool = False
+    alignment_strict: bool = False
 
     def is_empty(self) -> bool:
         return all(
@@ -438,6 +496,19 @@ class RetrievedChunk:
     resource_type: str | None = None
     audience: str | None = None
     local_pdf_path: str | None = None
+    source_id: str | None = None
+    publisher: str | None = None
+    source_role: str | None = None
+    licence: str | None = None
+    licence_url: str | None = None
+    source_url: str | None = None
+    content_partition: str | None = None
+    cisce_outcome_ids: list[str] = field(default_factory=list)
+    alignment_status: str | None = None
+    mapping_granularity: str | None = None
+    selection_reason: str | None = None
+    raw_rerank_score: float | None = None
+    rerank_probability: float | None = None
 
     # Which channels produced this candidate, in discovery order.
     retrieval_sources: list[str] = field(default_factory=list)
@@ -508,6 +579,16 @@ class RetrievedChunk:
             "section_title": self.section_title,
             "pages": self.page_range,
             "local_pdf_path": self.local_pdf_path,
+            "source_id": self.source_id,
+            "publisher": self.publisher,
+            "source_role": self.source_role,
+            "licence": self.licence,
+            "source_url": self.source_url,
+            "content_partition": self.content_partition,
+            "cisce_outcome_ids": list(self.cisce_outcome_ids),
+            "alignment_status": self.alignment_status,
+            "mapping_granularity": self.mapping_granularity,
+            "selection_reason": self.selection_reason,
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -527,6 +608,15 @@ class RetrievedChunk:
             "resource_type": self.resource_type,
             "audience": self.audience,
             "local_pdf_path": self.local_pdf_path,
+            "source_id": self.source_id,
+            "publisher": self.publisher,
+            "source_role": self.source_role,
+            "licence": self.licence,
+            "licence_url": self.licence_url,
+            "source_url": self.source_url,
+            "content_partition": self.content_partition,
+            "cisce_outcome_ids": list(self.cisce_outcome_ids),
+            "alignment_status": self.alignment_status,
             "retrieval_sources": list(self.retrieval_sources),
             "retrieval_source": self.retrieval_source,
             "retrieval_score": self.retrieval_score,
@@ -543,6 +633,10 @@ class RetrievedChunk:
             "rrf_contributions": dict(self.rrf_contributions),
             "rerank_score": self.rerank_score,
             "rerank_rank": self.rerank_rank,
+            "raw_rerank_score": self.raw_rerank_score,
+            "rerank_probability": self.rerank_probability,
+            "selection_reason": self.selection_reason,
+            "mapping_granularity": self.mapping_granularity,
             "concepts": list(self.concepts),
             "images": list(self.images),
         }
@@ -562,6 +656,7 @@ class RetrievalDiagnostics:
     graph_seeds: list[str] = field(default_factory=list)
     timings_ms: dict[str, float] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    graph_trace: dict[str, Any] | None = None
 
     def channel_counts(self) -> dict[str, int]:
         return {
@@ -585,6 +680,7 @@ class RetrievalDiagnostics:
             "graph": [c.to_dict() for c in self.graph],
             "fused": [c.to_dict() for c in self.fused],
             "reranked": [c.to_dict() for c in self.reranked],
+            "graph_trace": self.graph_trace,
         }
 
 

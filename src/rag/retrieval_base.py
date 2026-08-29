@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .curriculum_catalog import PRODUCTION_PARTITIONS
 from .schemas import RetrievalFilter, RetrievedChunk
 
 # Standard chunk projection, so every channel returns the same shape.
@@ -27,7 +28,17 @@ CHUNK_PROJECTION = """
     c.page_end        AS page_end,
     c.resource_type   AS resource_type,
     c.audience        AS audience,
-    c.local_pdf_path  AS local_pdf_path
+    c.local_pdf_path  AS local_pdf_path,
+    c.source_id       AS source_id,
+    c.publisher       AS publisher,
+    c.source_role     AS source_role,
+    c.licence         AS licence,
+    c.licence_url     AS licence_url,
+    c.source_url      AS source_url,
+    c.content_partition AS content_partition,
+    c.cisce_outcome_ids AS cisce_outcome_ids,
+    c.alignment_status AS alignment_status,
+    c.mapping_granularity AS mapping_granularity
 """
 
 
@@ -71,6 +82,16 @@ def build_filter_clause(
     if scope.document_id is not None:
         conditions.append(f"{alias}.document_id = $flt_document_id")
         params["flt_document_id"] = scope.document_id
+    if not scope.include_evaluation:
+        conditions.append(
+            f"coalesce({alias}.content_partition, 'student_evidence') IN $flt_ok_partitions"
+        )
+        params["flt_ok_partitions"] = list(PRODUCTION_PARTITIONS)
+    if scope.alignment_strict:
+        conditions.append(
+            f"size(coalesce({alias}.cisce_outcome_ids, [])) > 0 "
+            f"AND coalesce({alias}.alignment_status, 'unmapped') <> 'unmapped'"
+        )
 
     return " AND ".join(conditions), params
 
@@ -105,4 +126,14 @@ def chunk_from_record(record: dict[str, Any]) -> RetrievedChunk:
         resource_type=record.get("resource_type"),
         audience=record.get("audience"),
         local_pdf_path=record.get("local_pdf_path"),
+        source_id=record.get("source_id"),
+        publisher=record.get("publisher"),
+        source_role=record.get("source_role"),
+        licence=record.get("licence"),
+        licence_url=record.get("licence_url"),
+        source_url=record.get("source_url"),
+        content_partition=record.get("content_partition"),
+        cisce_outcome_ids=list(record.get("cisce_outcome_ids") or []),
+        alignment_status=record.get("alignment_status"),
+        mapping_granularity=record.get("mapping_granularity"),
     )

@@ -21,7 +21,7 @@ from .config import RetrievalConfig
 from .graph_schema import CHUNK_FULLTEXT_INDEX
 from .logging_utils import Timer, get_logger
 from .neo4j_store import Neo4jStore
-from .retrieval_base import build_filter_clause, chunk_from_record, where_clause
+from .retrieval_base import CHUNK_PROJECTION, build_filter_clause, chunk_from_record, where_clause
 from .schemas import CHANNEL_FULLTEXT, RetrievalFilter, RetrievedChunk
 
 LOGGER = get_logger(__name__)
@@ -155,21 +155,7 @@ class LexicalRetriever:
         YIELD node AS c, score
         {where_clause(filter_clause)}
         RETURN
-            c.chunk_id        AS chunk_id,
-            c.text            AS text,
-            c.grade           AS grade,
-            c.subject         AS subject,
-            c.unit_id         AS unit_id,
-            c.unit_title      AS unit_title,
-            c.document_id     AS document_id,
-            c.document_title  AS document_title,
-            c.section_id      AS section_id,
-            c.section_title   AS section_title,
-            c.page_start      AS page_start,
-            c.page_end        AS page_end,
-            c.resource_type   AS resource_type,
-            c.audience        AS audience,
-            c.local_pdf_path  AS local_pdf_path,
+            {CHUNK_PROJECTION},
             score             AS score
         ORDER BY score DESC
         LIMIT $top_k

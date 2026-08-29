@@ -27,17 +27,17 @@ from rag.schemas import (
 
 class TestIdentifiers:
     def test_hierarchy_ids_nest(self):
-        grade = grade_id_for(2)
-        subject = subject_id_for(2, "Science")
-        unit = unit_id_for(2, "Science", "unit_01_matter")
-        assert grade == "grade_02"
-        assert subject == "grade_02:science"
-        assert unit == "grade_02:science:unit_01_matter"
+        grade = grade_id_for(3)
+        subject = subject_id_for(3, "Science")
+        unit = unit_id_for(3, "Science", "unit_01_matter")
+        assert grade == "grade_03"
+        assert subject == "grade_03:science"
+        assert unit == "grade_03:science:unit_01_matter"
         assert unit.startswith(subject)
         assert subject.startswith(grade)
 
     def test_leaf_ids_are_zero_padded_and_sortable(self):
-        document = "grade_02:science:unit_01_matter:student:student_book"
+        document = "grade_03:science:unit_01_matter:student:student_book"
         pages = [page_id_for(document, n) for n in (2, 10, 100)]
         assert pages == [
             f"{document}:p0002",
@@ -66,7 +66,7 @@ class TestIdentifiers:
         "value,expected",
         [
             ("Plant Life Cycle", "plant_life_cycle"),
-            ("Sun, Moon, and Stars", "sun_moon_and_stars"),
+            ("Properties of Multiplication and Division", "properties_of_multiplication_and_division"),
             ("  spaced  out  ", "spaced_out"),
             ("Café", "cafe"),
             ("2-D Shapes", "2_d_shapes"),
@@ -115,43 +115,48 @@ class TestConceptNormalisation:
 
 
 class TestFilterTranslation:
-    def test_empty_filter_produces_no_predicate(self):
+    def test_empty_filter_still_excludes_evaluation_only(self):
         clause, params = build_filter_clause(RetrievalFilter())
+        assert "content_partition" in clause
+        assert params["flt_ok_partitions"] == ["student_evidence", "teacher_strategy"]
+
+    def test_evaluation_opt_in_drops_partition_guard(self):
+        clause, params = build_filter_clause(RetrievalFilter(include_evaluation=True))
         assert clause == ""
         assert params == {}
-        assert where_clause(clause) == ""
 
     def test_grade_and_subject_become_parameterised_predicates(self):
-        clause, params = build_filter_clause(RetrievalFilter(grade=1, subject="Science"))
+        clause, params = build_filter_clause(RetrievalFilter(grade=3, subject="Science"))
         assert "c.grade = $flt_grade" in clause
         assert "c.subject = $flt_subject" in clause
         assert " AND " in clause
-        assert params == {"flt_grade": 1, "flt_subject": "science"}
+        assert params["flt_grade"] == 3
+        assert params["flt_subject"] == "science"
 
     def test_values_are_never_inlined_into_cypher(self):
         """Everything is a bound parameter, so no query-injection surface."""
         clause, params = build_filter_clause(
-            RetrievalFilter(unit_id="grade_01:science:unit_01' OR true //")
+            RetrievalFilter(unit_id="grade_03:science:unit_01' OR true //")
         )
         assert "OR true" not in clause
-        assert params["flt_unit_id"] == "grade_01:science:unit_01' OR true //"
+        assert params["flt_unit_id"] == "grade_03:science:unit_01' OR true //"
 
     def test_alias_can_be_rebound(self):
         clause, _ = build_filter_clause(RetrievalFilter(grade=3), alias="chunk")
-        assert clause == "chunk.grade = $flt_grade"
+        assert clause.startswith("chunk.grade = $flt_grade")
 
     def test_all_supported_dimensions_are_translated(self):
         scope = RetrievalFilter(
-            grade=2,
+            grade=3,
             subject="mathematics",
-            unit_id="grade_02:mathematics:unit_03",
-            unit_title_contains="Addition",
-            resource_type="student_book",
+            unit_id="grade_03:mathematics:unit_03",
+            unit_title_contains="Fractions",
+            resource_type="module",
             audience="student",
             document_id="doc-1",
         )
         clause, params = build_filter_clause(scope)
-        assert len(params) == 7
+        assert len(params) == 8
         for key in params:
             assert f"${key}" in clause
 
@@ -162,31 +167,35 @@ class TestFilterTranslation:
 
     def test_describe_reports_active_scope_only(self):
         assert "no filter" in RetrievalFilter().describe()
-        described = RetrievalFilter(grade=1, subject="science").describe()
+        described = RetrievalFilter(grade=3, subject="science").describe()
         assert "grade" in described and "science" in described
 
 
 class TestRecordMapping:
     def test_projection_record_becomes_traceable_chunk(self):
         record = {
-            "chunk_id": "grade_01:science:unit_01:student:book:s0002:c0001",
-            "text": "The moon appears to change shape.",
-            "grade": 1,
+            "chunk_id": "grade_03:science:unit_01:student:book:s0002:c0001",
+            "text": "Weather is the condition of the air outside.",
+            "grade": 3,
             "subject": "science",
-            "unit_id": "grade_01:science:unit_01_sun_moon_and_stars",
-            "unit_title": "Sun, Moon, and Stars",
-            "document_id": "grade_01:science:unit_01:student:book",
-            "document_title": "Sun, Moon, and Stars - Student Reader",
-            "section_id": "grade_01:science:unit_01:student:book:s0002",
-            "section_title": "Phases of the Moon",
+            "unit_id": "grade_03:science:unit_01_science_oer",
+            "unit_title": "Utah Science OER Textbook",
+            "document_id": "grade_03:science:unit_01:student:book",
+            "document_title": "Utah Science OER Textbook - Student Book",
+            "section_id": "grade_03:science:unit_01:student:book:s0002",
+            "section_title": "Weather",
             "page_start": 12,
             "page_end": 13,
-            "resource_type": "student_reader",
+            "resource_type": "student_book",
             "audience": "student",
-            "local_pdf_path": "/corpus/student_reader.pdf",
+            "local_pdf_path": "/corpus/student_book.pdf",
+            "source_id": "utah_science_oer",
+            "source_role": "primary",
+            "licence": "See source notices",
+            "content_partition": "student_evidence",
         }
         chunk = chunk_from_record(record)
-        assert chunk.grade == 1
+        assert chunk.grade == 3
         assert chunk.page_range == "12-13"
         provenance = chunk.provenance()
         for key in ("grade", "subject", "unit_id", "document_id", "pages"):

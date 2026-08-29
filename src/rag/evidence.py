@@ -31,6 +31,7 @@ from typing import Sequence
 
 from .config import EvidenceConfig
 from .logging_utils import get_logger
+from .partitions import is_boilerplate_text, is_production_partition
 from .schemas import EvidenceCheck, EvidenceDecision, RetrievalFilter, RetrievedChunk
 
 LOGGER = get_logger(__name__)
@@ -108,7 +109,37 @@ class EvidenceGate:
                 sufficient=False, checks=checks, reasons=reasons, confidence="unknown"
             )
 
-        # 2. best reranker score clears the floor
+        safe: list[RetrievedChunk] = []
+        rejected_unsafe = 0
+        for chunk in scored:
+            partition = chunk.content_partition or "student_evidence"
+            if not is_production_partition(partition) or is_boilerplate_text(chunk.text or ""):
+                rejected_unsafe += 1
+                continue
+            safe.append(chunk)
+        safe_ok = len(safe) > 0
+        checks.append(
+            EvidenceCheck(
+                name="safe_partition",
+                passed=safe_ok,
+                detail=(
+                    f"{len(safe)} production chunk(s); "
+                    f"{rejected_unsafe} rejected as boilerplate or unsafe partition"
+                ),
+                value=len(safe),
+            )
+        )
+        if not safe_ok:
+            reasons.append(
+                "Retrieved passages were licence/credits boilerplate or "
+                "unsafe solution/practice material."
+            )
+            return EvidenceDecision(
+                sufficient=False, checks=checks, reasons=reasons, confidence="none"
+            )
+        scored = safe
+
+        # 2. best reranker score clears the floor (raw logit; 0.0 ≈ P=0.5)
         top_score = max(c.rerank_score for c in scored)  # type: ignore[type-var]
         score_ok = top_score >= self.config.min_rerank_score
         checks.append(
