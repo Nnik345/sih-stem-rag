@@ -454,6 +454,8 @@ Ordinary ingestion does not delete the graph.
   are skipped.
 - Siyavula learner ePUBs are CC BY; branded ND PDFs are not used.
 - All CISCE mappings are `needs_human_review` until a reviewer signs them.
+  A PDF review rewrote the draft crosswalk; it is not approved for
+  `ALIGN_STRICT`.
 
 ## Models
 

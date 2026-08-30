@@ -1,69 +1,217 @@
-# Original paraphrased CISCE Primary STEM outcomes for Grades 3–5.
+# CISCE Grade 3–5 STEM crosswalk (draft after human PDF review).
 # CISCE is the alignment authority only: the official PDF is not ingested,
-# embedded, or retrieved. Summaries below are short paraphrases, not excerpts.
-# Every mapping is marked needs_human_review until a human signs the reviewer field.
+# embedded, or retrieved. Summaries are short paraphrases, not excerpts.
+#
+# Printed page numbers refer to the 2025 PrimaryCurriculum.pdf
+# (curriculum/raw/_alignment_only/cisce/PrimaryCurriculum.pdf).
+# Science Class III begins at printed p.154, Class IV at p.165, Class V at p.178.
+# Mathematics Class III begins at printed p.82, Class IV at p.90, Class V at p.101.
+#
+# Every mapping stays needs_human_review. ALIGN_STRICT must not treat this file
+# as approved. Empty mapped_units means no ingested source is claimed.
+# Removed as CISCE mappings (do not restore as strict): Class III fractions,
+# Class III weather/seasons, Class IV Earth/sky/planets, Class IV angles (M4),
+# Class IV decimals (M6), Class V coordinate plane (M6).
 
 outcomes:
+  # --- Class III Mathematics ---
+  - outcome_id: cisce_g3_math_numbers
+    grade: 3
+    subject: mathematics
+    summary: Read, write and use place value with numbers to 9,999.
+    cisce_page: "PrimaryCurriculum.pdf printed p.82 (Class III Mathematics, Theme 1: Numbers)"
+    mapped_units:
+      - module_02_place_value_and_problem_solving_with_units_of_measure
+    section_patterns:
+      - place value
+      - thousands
+      - four-digit
+      - 9,999
+      - expanded form
+    section_exclude_patterns:
+      - centimetre
+      - kilogram
+      - litre
+      - gram
+      - clock
+      - calendar
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
   - outcome_id: cisce_g3_math_number_operations
     grade: 3
     subject: mathematics
-    summary: Use place value and the four operations to solve whole-number problems.
-    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class III)"
+    summary: Add and subtract within 999; use multiplication facts; divide by grouping and sharing; solve simple money problems.
+    cisce_page: "PrimaryCurriculum.pdf printed p.83 (Class III Mathematics, Theme 2: Number Operations)"
     mapped_units:
       - module_01_properties_of_multiplication_and_division
       - module_03_multiplication_and_division_with_units_of_0_1_6_9_and_multip
-    alignment_status: needs_human_review
-    reviewer: ""
-
-  - outcome_id: cisce_g3_math_measurement
-    grade: 3
-    subject: mathematics
-    summary: Measure and compare length, mass, capacity and time with standard units.
-    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class III)"
-    mapped_units:
-      - module_02_place_value_and_problem_solving_with_units_of_measure
-    alignment_status: needs_human_review
-    reviewer: ""
-
-  - outcome_id: cisce_g3_math_fractions
-    grade: 3
-    subject: mathematics
-    summary: Recognise unit fractions and locate them on a number line.
-    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class III)"
-    mapped_units:
-      - module_05_fractions_as_numbers_on_the_number_line
+    section_patterns:
+      - multiplication
+      - division
+      - grouping
+      - sharing
+      - equal groups
+      - array
+      - money
+    mapping_granularity: section
+    review_note: EngageNY G3 M1 and M3 cover multiplication and division, not the full CISCE operations theme. Addition and subtraction within 999 remain under-covered.
     alignment_status: needs_human_review
     reviewer: ""
 
   - outcome_id: cisce_g3_math_geometry
     grade: 3
     subject: mathematics
-    summary: Describe plane shapes, area of rectangles, and simple perimeter problems.
-    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class III)"
+    summary: Describe 2D shapes using sides, corners and diagonals; explore tangrams, tessellation and simple maps.
+    cisce_page: "PrimaryCurriculum.pdf printed p.85 (Class III Mathematics, Theme 3: Geometry)"
     mapped_units:
-      - module_04_multiplication_and_area
       - module_07_geometry_and_measurement_word_problems
+    section_patterns:
+      - two-dimensional
+      - 2-d
+      - polygon
+      - quadrilateral
+      - triangle
+      - side
+      - vertex
+      - corner
+      - diagonal
+      - tangram
+      - tessellat
+      - map
+    section_exclude_patterns:
+      - area
+      - perimeter
+      - rectangular array
+    mapping_granularity: section
+    review_note: EngageNY G3 Module 4 (area) is not a Class III CISCE geometry outcome and is not mapped.
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g3_math_measurement
+    grade: 3
+    subject: mathematics
+    summary: Measure length with standard units; compare weight on a simple balance; compare capacity with non-standard units; use a calendar and read time.
+    cisce_page: "PrimaryCurriculum.pdf printed p.86 (Class III Mathematics, Theme 4: Measurement)"
+    mapped_units:
+      - module_02_place_value_and_problem_solving_with_units_of_measure
+    section_patterns:
+      - centimetre
+      - centimeter
+      - metre
+      - meter
+      - length
+      - balance
+      - capacity
+      - calendar
+      - clock
+      - hour
+      - minute
+      - time
+    section_exclude_patterns:
+      - place value
+      - thousands
+      - kilogram
+      - liter
+      - litre
+    mapping_granularity: section
+    review_note: CISCE uses standard units for length only. Weight and capacity stay non-standard; do not inherit EngageNY metric mass/volume lessons.
     alignment_status: needs_human_review
     reviewer: ""
 
   - outcome_id: cisce_g3_math_data
     grade: 3
     subject: mathematics
-    summary: Collect, display and read simple categorical data.
-    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class III)"
+    summary: Record data using tally marks, represent it pictorially and draw conclusions.
+    cisce_page: "PrimaryCurriculum.pdf printed p.88 (Class III Mathematics, Theme 5: Data Handling)"
     mapped_units:
       - module_06_collecting_and_displaying_data
+    section_patterns:
+      - tally
+      - pictograph
+      - picture graph
+      - bar graph
+      - data
+    mapping_granularity: section
     alignment_status: needs_human_review
     reviewer: ""
 
+  - outcome_id: cisce_g3_math_patterns
+    grade: 3
+    subject: mathematics
+    summary: Observe and extend number and shape patterns.
+    cisce_page: "PrimaryCurriculum.pdf printed p.89 (Class III Mathematics, Theme 6: Patterns)"
+    mapped_units: []
+    review_note: No ingested EngageNY Grade 3 module is a strict Patterns match.
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  # --- Class IV Mathematics ---
   - outcome_id: cisce_g4_math_place_value
     grade: 4
     subject: mathematics
-    summary: Use place value to round and compute with multi-digit whole numbers.
-    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class IV)"
+    summary: Use place value with six-digit numbers.
+    cisce_page: "PrimaryCurriculum.pdf printed p.90 (Class IV Mathematics, Theme 1: Numbers)"
     mapped_units:
       - module_01_place_value_rounding_and_algorithms_for_addition_and_subtrac
+    section_patterns:
+      - place value
+      - hundred thousand
+      - six-digit
+      - millions
+      - expanded form
+    section_exclude_patterns:
+      - rounding
+      - rounded
+      - round to
+      - nearest ten
+      - nearest hundred
+    mapping_granularity: section
+    review_note: Rounding is a Class V CISCE outcome, not Class IV. Rounding lessons in EngageNY G4 M1 are excluded.
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g4_math_number_operations
+    grade: 4
+    subject: mathematics
+    summary: Add, subtract, multiply and divide multi-digit whole numbers.
+    cisce_page: "PrimaryCurriculum.pdf printed p.92 (Class IV Mathematics, Theme 2: Number Operations)"
+    mapped_units:
       - module_03_multi_digit_multiplication_and_division
+      - module_01_place_value_rounding_and_algorithms_for_addition_and_subtrac
+    section_patterns:
+      - addition
+      - subtraction
+      - multiplication
+      - division
+      - algorithm
+      - multi-digit
+    section_exclude_patterns:
+      - rounding
+      - rounded
+      - round to
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g4_math_playing_with_numbers
+    grade: 4
+    subject: mathematics
+    summary: Explore factors, multiples and related number properties.
+    cisce_page: "PrimaryCurriculum.pdf printed p.94 (Class IV Mathematics, Theme 3: Playing with Numbers)"
+    mapped_units: []
+    review_note: No ingested Grade 4 source is a strict Playing with Numbers match.
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g4_math_geometry
+    grade: 4
+    subject: mathematics
+    summary: Work with circles, symmetry, tiling, nets, views, lines, area and perimeter.
+    cisce_page: "PrimaryCurriculum.pdf printed p.95 (Class IV Mathematics, Theme 4: Geometry)"
+    mapped_units: []
+    review_note: EngageNY G4 Module 4 (angle measure) is a Class V CISCE theme, not Class IV, and is not mapped.
     alignment_status: needs_human_review
     reviewer: ""
 
@@ -71,42 +219,91 @@ outcomes:
     grade: 4
     subject: mathematics
     summary: Convert metric units and solve measurement problems.
-    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class IV)"
+    cisce_page: "PrimaryCurriculum.pdf printed p.97 (Class IV Mathematics, Theme 5: Measurement)"
     mapped_units:
       - module_02_unit_conversions_and_problem_solving_with_metric_measurement
       - module_07_exploring_measurement_with_multiplication
+    section_patterns:
+      - convert
+      - metric
+      - centimetre
+      - centimeter
+      - metre
+      - meter
+      - kilometre
+      - gram
+      - kilogram
+      - litre
+      - liter
+      - millilitre
+    section_exclude_patterns:
+      - inch
+      - pound
+      - ounce
+      - gallon
+      - customary
+    mapping_granularity: section
     alignment_status: needs_human_review
     reviewer: ""
 
-  - outcome_id: cisce_g4_math_fractions_decimals
+  - outcome_id: cisce_g4_math_fractions
     grade: 4
     subject: mathematics
-    summary: Compare fractions and relate tenths and hundredths to decimal notation.
-    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class IV)"
+    summary: Identify types of fractions, use equivalence, and add or subtract like fractions.
+    cisce_page: "PrimaryCurriculum.pdf printed p.90-91 (Class IV Mathematics, Theme 1: Numbers — types of fractions, equivalence, addition and subtraction of like fractions)"
     mapped_units:
       - module_05_fraction_equivalence_ordering_and_operations
-      - module_06_decimal_fractions
+    section_patterns:
+      - equivalent
+      - like fraction
+      - numerator
+      - denominator
+      - improper
+      - mixed number
+    section_exclude_patterns:
+      - decimal
+      - tenth
+      - hundredth
+    mapping_granularity: section
+    review_note: Decimal notation is not a Class IV CISCE outcome. EngageNY G4 Module 6 is not mapped.
     alignment_status: needs_human_review
     reviewer: ""
 
-  - outcome_id: cisce_g4_math_geometry
+  - outcome_id: cisce_g4_math_data
     grade: 4
     subject: mathematics
-    summary: Measure angles and classify plane figures.
-    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class IV)"
-    mapped_units:
-      - module_04_angle_measure_and_plane_figures
+    summary: Collect, organise and read data displays.
+    cisce_page: "PrimaryCurriculum.pdf printed p.99 (Class IV Mathematics, Theme 6: Data Handling)"
+    mapped_units: []
     alignment_status: needs_human_review
     reviewer: ""
 
-  - outcome_id: cisce_g5_math_decimals
+  - outcome_id: cisce_g4_math_patterns
+    grade: 4
+    subject: mathematics
+    summary: Find, extend and express patterns in numbers and shapes.
+    cisce_page: "PrimaryCurriculum.pdf printed p.100 (Class IV Mathematics, Theme 7: Patterns)"
+    mapped_units: []
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  # --- Class V Mathematics ---
+  - outcome_id: cisce_g5_math_numbers
     grade: 5
     subject: mathematics
-    summary: Use place value with decimals and operate on decimal numbers.
-    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class V)"
-    mapped_units:
-      - module_01_place_value_and_decimal_fractions
-      - module_02_multi_digit_whole_number_and_decimal_fraction_operations
+    summary: Use place value to understand large whole numbers.
+    cisce_page: "PrimaryCurriculum.pdf printed p.101 (Class V Mathematics, Theme 1: Numbers)"
+    mapped_units: []
+    review_note: EngageNY G5 M1 mixes whole-number and decimal place value; it is reserved for the decimals outcome with section filters.
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_math_number_operations
+    grade: 5
+    subject: mathematics
+    summary: Operate on large whole numbers.
+    cisce_page: "PrimaryCurriculum.pdf printed p.103 (Class V Mathematics, Theme 2: Number Operations)"
+    mapped_units: []
     alignment_status: needs_human_review
     reviewer: ""
 
@@ -114,207 +311,742 @@ outcomes:
     grade: 5
     subject: mathematics
     summary: Add, subtract, multiply and divide fractions in problem contexts.
-    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class V)"
+    cisce_page: "PrimaryCurriculum.pdf printed p.105 (Class V Mathematics, Theme 3: Fractions and Decimals)"
     mapped_units:
       - module_03_addition_and_subtraction_of_fractions
       - module_04_multiplication_and_division_of_fractions_and_decimal_fractio
+    section_patterns:
+      - fraction
+      - numerator
+      - denominator
+      - mixed number
+    section_exclude_patterns:
+      - decimal fraction of a metre
+    mapping_granularity: section
     alignment_status: needs_human_review
     reviewer: ""
 
-  - outcome_id: cisce_g5_math_volume_coordinates
+  - outcome_id: cisce_g5_math_decimals
     grade: 5
     subject: mathematics
-    summary: Relate volume to multiplication and locate points in the first quadrant.
-    cisce_page: "PrimaryCurriculum.pdf (Mathematics, Class V)"
+    summary: Use decimal place value; compare, add, subtract and multiply decimal numbers.
+    cisce_page: "PrimaryCurriculum.pdf printed p.105 (Class V Mathematics, Theme 3: Fractions and Decimals)"
     mapped_units:
-      - module_05_addition_and_multiplication_with_volume_and_area
-      - module_06_problem_solving_with_the_coordinate_plane
+      - module_01_place_value_and_decimal_fractions
+      - module_02_multi_digit_whole_number_and_decimal_fraction_operations
+    section_patterns:
+      - decimal
+      - tenth
+      - hundredth
+      - thousandth
+    mapping_granularity: section
     alignment_status: needs_human_review
     reviewer: ""
 
-  - outcome_id: cisce_g3_sci_living_world
+  - outcome_id: cisce_g5_math_playing_with_numbers
+    grade: 5
+    subject: mathematics
+    summary: Use factors, multiples, primes and related number relationships.
+    cisce_page: "PrimaryCurriculum.pdf printed p.107 (Class V Mathematics, Theme 4: Playing with Numbers)"
+    mapped_units: []
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_math_negative_numbers
+    grade: 5
+    subject: mathematics
+    summary: Meet numbers less than zero in directed everyday situations.
+    cisce_page: "PrimaryCurriculum.pdf printed p.109 (Class V Mathematics, Theme 5: Introduction to Negative Numbers)"
+    mapped_units: []
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_math_geometry
+    grade: 5
+    subject: mathematics
+    summary: Classify and reason about plane figures, including angle ideas at Class V.
+    cisce_page: "PrimaryCurriculum.pdf printed p.110 (Class V Mathematics, Theme 6: Geometry)"
+    mapped_units: []
+    review_note: Angle classification belongs here, not in Class IV. EngageNY G4 M4 is the wrong grade for a strict Class IV map and is not attached to Class V until re-reviewed.
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_math_measurement_volume
+    grade: 5
+    subject: mathematics
+    summary: Relate volume and area to multiplication.
+    cisce_page: "PrimaryCurriculum.pdf printed p.112 (Class V Mathematics, Theme 7: Measurement)"
+    mapped_units:
+      - module_05_addition_and_multiplication_with_volume_and_area
+    section_patterns:
+      - volume
+      - cubic
+      - rectangular prism
+      - area
+    section_exclude_patterns:
+      - coordinate
+      - ordered pair
+    mapping_granularity: section
+    review_note: The coordinate plane is not a CISCE Class V topic. EngageNY G5 Module 6 is not mapped.
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_math_percentage
+    grade: 5
+    subject: mathematics
+    summary: Use percentage in everyday contexts.
+    cisce_page: "PrimaryCurriculum.pdf printed p.113 (Class V Mathematics, Theme 8: Introduction to Percentage)"
+    mapped_units: []
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_math_data
+    grade: 5
+    subject: mathematics
+    summary: Read and construct common data displays.
+    cisce_page: "PrimaryCurriculum.pdf printed p.114 (Class V Mathematics, Theme 9: Data Handling)"
+    mapped_units: []
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_math_patterns
+    grade: 5
+    subject: mathematics
+    summary: Generalise patterns in numbers and shapes.
+    cisce_page: "PrimaryCurriculum.pdf printed p.115 (Class V Mathematics, Theme 10: Patterns)"
+    mapped_units: []
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  # --- Class III Science ---
+  - outcome_id: cisce_g3_sci_living_nonliving
     grade: 3
     subject: science
-    summary: Observe organisms, habitats and how living things use resources.
-    cisce_page: "PrimaryCurriculum.pdf p.152 (Science, Class III)"
+    summary: Identify living and non-living things in the surroundings.
+    cisce_page: "PrimaryCurriculum.pdf printed p.154 (Class III Science, Theme 1: Living and Non-Living things)"
     mapped_units:
       - unit_01_science_oer
     section_patterns:
-      - organism
-      - habitat
-      - living
-      - life cycle
+      - non-living
+      - nonliving
+      - living thing
+      - living and non-living
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g3_sci_human_body
+    grade: 3
+    subject: science
+    summary: Locate and describe internal organs and simple body processes such as respiration.
+    cisce_page: "PrimaryCurriculum.pdf printed p.155 (Class III Science, Theme 2: Human Body)"
+    mapped_units: []
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g3_sci_birds
+    grade: 3
+    subject: science
+    summary: Observe birds in the surroundings and their distinctive features.
+    cisce_page: "PrimaryCurriculum.pdf printed p.156 (Class III Science, Theme 3: Animals: Birds)"
+    mapped_units:
+      - unit_01_science_oer
+    section_patterns:
+      - bird
+      - beak
+      - feather
+      - nest
+    section_exclude_patterns:
+      - polar bear
       - inherited
-      - trait
-      - plant
-      - animal
-      - egg
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g3_sci_insects
+    grade: 3
+    subject: science
+    summary: Observe common insects in the surroundings.
+    cisce_page: "PrimaryCurriculum.pdf printed p.157 (Class III Science, Theme 4: Animals: Common Insects)"
+    mapped_units:
+      - unit_01_science_oer
+    section_patterns:
+      - insect
+      - ant
+      - bee
+      - butterfly
+      - mosquito
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g3_sci_plants
+    grade: 3
+    subject: science
+    summary: Identify parts of plants, including seeds, in the surroundings.
+    cisce_page: "PrimaryCurriculum.pdf printed p.158 (Class III Science, Theme 5: Plants in the Surroundings)"
+    mapped_units:
+      - unit_01_science_oer
+    section_patterns:
+      - root
+      - stem
+      - leaf
+      - seed
+      - flower
+      - parts of a plant
+    section_exclude_patterns:
+      - habitat
+      - inherited
       - polar bear
     mapping_granularity: section
     alignment_status: needs_human_review
     reviewer: ""
 
-  - outcome_id: cisce_g3_sci_earth_weather
+  - outcome_id: cisce_g3_sci_food_from_plants
     grade: 3
     subject: science
-    summary: Describe weather, seasons and simple Earth processes from observation.
-    cisce_page: "PrimaryCurriculum.pdf p.152 (Science, Class III)"
+    summary: Recognise food obtained from different parts of plants.
+    cisce_page: "PrimaryCurriculum.pdf printed p.159 (Class III Science, Theme 6: Food we get from Plants)"
     mapped_units:
       - unit_01_science_oer
     section_patterns:
-      - weather
-      - season
-      - flood
-      - rain
-      - wind
-      - instrument
-      - cloud
-      - snow
-      - climate
+      - food from plant
+      - vegetable
+      - fruit
+      - cereal
+      - grain
     mapping_granularity: section
     alignment_status: needs_human_review
     reviewer: ""
 
-  - outcome_id: cisce_g3_sci_forces_materials
+  - outcome_id: cisce_g3_sci_matter
     grade: 3
     subject: science
-    summary: Explore motion, forces and properties of everyday materials.
-    cisce_page: "PrimaryCurriculum.pdf p.152 (Science, Class III)"
+    summary: Identify solids, liquids and gases as everyday forms of matter.
+    cisce_page: "PrimaryCurriculum.pdf printed p.160 (Class III Science, Theme 7: Forms of Matter)"
     mapped_units:
       - unit_01_science_oer
     section_patterns:
-      - force
+      - solid
+      - liquid
+      - gas
+      - forms of matter
+    section_exclude_patterns:
       - magnet
-      - motion
-      - material
-      - zipper
-      - sled
-      - ball
-      - bounce
+      - force
+      - friction
     mapping_granularity: section
     alignment_status: needs_human_review
     reviewer: ""
 
-  - outcome_id: cisce_g4_sci_life
+  - outcome_id: cisce_g3_sci_water
+    grade: 3
+    subject: science
+    summary: Investigate observable properties of water and water as a resource, including the water cycle.
+    cisce_page: "PrimaryCurriculum.pdf printed p.161-162 (Class III Science, Themes 8-9: Properties of Water; Water as a Resource)"
+    mapped_units:
+      - unit_01_science_oer
+    section_patterns:
+      - float
+      - sink
+      - soluble
+      - dissolve
+      - water cycle
+      - evaporation
+      - condensation
+      - water as a resource
+    section_exclude_patterns:
+      - weather instrument
+      - thermometer
+      - climate
+      - season
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g3_sci_sun
+    grade: 3
+    subject: science
+    summary: Explain the Sun as a natural resource used in daily life.
+    cisce_page: "PrimaryCurriculum.pdf printed p.163 (Class III Science, Theme 10: Sun as a Natural Resource)"
+    mapped_units:
+      - unit_01_science_oer
+    section_patterns:
+      - sun as
+      - sunlight
+      - solar
+      - natural resource
+    section_exclude_patterns:
+      - solar system
+      - planet
+      - eclipse
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g3_sci_cleanliness
+    grade: 3
+    subject: science
+    summary: Practise cleanliness, health and hygiene for self and surroundings.
+    cisce_page: "PrimaryCurriculum.pdf printed p.164 (Class III Science, Theme 11: Cleanliness, Health and Hygiene)"
+    mapped_units: []
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  # --- Class IV Science ---
+  - outcome_id: cisce_g4_sci_food
     grade: 4
     subject: science
-    summary: Describe plants, animals and life processes using primary learner text.
-    cisce_page: "PrimaryCurriculum.pdf (Science, Class IV; confirm printed page in review)"
+    summary: Identify components of food and the need for a balanced diet.
+    cisce_page: "PrimaryCurriculum.pdf printed p.165 (Class IV Science, Theme 1: Human Body: Food we Eat)"
     mapped_units:
       - unit_01_natural_sciences
       - unit_01_science_oer
     section_patterns:
-      - plant
-      - animal
-      - living
+      - balanced diet
+      - nutrient
+      - carbohydrate
+      - protein
+      - vitamin
+      - nutrition
+    section_exclude_patterns:
       - food chain
+      - food web
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g4_sci_teeth
+    grade: 4
+    subject: science
+    summary: Describe kinds of teeth and dental care.
+    cisce_page: "PrimaryCurriculum.pdf printed p.167 (Class IV Science, Theme 2: Human Body: The Teeth)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - tooth
+      - teeth
+      - dental
+      - molar
+      - incisor
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g4_sci_digestive_excretory
+    grade: 4
+    subject: science
+    summary: Describe the digestive and excretory systems.
+    cisce_page: "PrimaryCurriculum.pdf printed p.168 (Class IV Science, Theme 3: Human Body: The Digestive and Excretory Systems)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - digestive
+      - digestion
+      - excretory
+      - excretion
+      - stomach
+      - intestine
+      - kidney
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g4_sci_animal_adaptation
+    grade: 4
+    subject: science
+    summary: Explain why animals adapt to different habitats and diets.
+    cisce_page: "PrimaryCurriculum.pdf printed p.169 (Class IV Science, Theme 4: Adaptation in Animals)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - adaptation in animal
+      - herbivore
+      - carnivore
+      - omnivore
       - habitat
+    section_exclude_patterns:
+      - insect
+      - food chain
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g4_sci_plant_adaptation
+    grade: 4
+    subject: science
+    summary: Explain plant adaptations on land and in water.
+    cisce_page: "PrimaryCurriculum.pdf printed p.170 (Class IV Science, Theme 5: Adaptation in Plants)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - adaptation in plant
+      - aquatic plant
+      - desert plant
+      - cactus
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g4_sci_plants_environment
+    grade: 4
+    subject: science
+    summary: Classify plants and describe functions of plant parts, including leaves.
+    cisce_page: "PrimaryCurriculum.pdf printed p.171 (Class IV Science, Theme 6: Plants in the Surroundings and Environment)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
       - photosynthesis
-      - seed
+      - chlorophyll
+      - function of leaves
+      - transpiration
+    section_exclude_patterns:
+      - food chain
       - insect
     mapping_granularity: section
     alignment_status: needs_human_review
     reviewer: ""
 
-  - outcome_id: cisce_g4_sci_matter_energy
+  - outcome_id: cisce_g4_sci_air
     grade: 4
     subject: science
-    summary: Investigate matter, materials, energy and change in everyday contexts.
-    cisce_page: "PrimaryCurriculum.pdf (Science, Class IV; confirm printed page in review)"
+    summary: Describe properties of air and causes of air pollution.
+    cisce_page: "PrimaryCurriculum.pdf printed p.172 (Class IV Science, Theme 7: Air)"
     mapped_units:
       - unit_01_natural_sciences
       - unit_01_science_oer
     section_patterns:
-      - energy
-      - matter
-      - material
-      - electricity
-      - heat
+      - properties of air
+      - air pollution
+      - oxygen
+      - carbon dioxide
+    section_exclude_patterns:
       - sound
-      - solid
-      - liquid
+      - circuit
+      - electricity
     mapping_granularity: section
     alignment_status: needs_human_review
     reviewer: ""
 
-  - outcome_id: cisce_g4_sci_earth
+  - outcome_id: cisce_g4_sci_materials_solutions
     grade: 4
     subject: science
-    summary: Relate Earth features, soil, water and sky observations to local evidence.
-    cisce_page: "PrimaryCurriculum.pdf (Science, Class IV; confirm printed page in review)"
+    summary: Use solute, solvent and solution in everyday examples.
+    cisce_page: "PrimaryCurriculum.pdf printed p.173 (Class IV Science, Theme 8: Materials and Solutions)"
     mapped_units:
       - unit_01_natural_sciences
       - unit_01_science_oer
     section_patterns:
-      - earth
-      - soil
-      - rock
-      - water
-      - moon
-      - planet
-      - weather
-      - sky
+      - solute
+      - solvent
+      - solution
+      - dissolve
+      - soluble
     mapping_granularity: section
     alignment_status: needs_human_review
     reviewer: ""
 
-  - outcome_id: cisce_g5_sci_life
+  - outcome_id: cisce_g4_sci_light
+    grade: 4
+    subject: science
+    summary: Identify sources of light and simple properties of light.
+    cisce_page: "PrimaryCurriculum.pdf printed p.174 (Class IV Science, Theme 9: Light)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - source of light
+      - luminous
+      - shadow
+      - reflection
+    section_exclude_patterns:
+      - eclipse
+      - rotation of the earth
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g4_sci_measurement
+    grade: 4
+    subject: science
+    summary: Use standard units to measure everyday quantities.
+    cisce_page: "PrimaryCurriculum.pdf printed p.175 (Class IV Science, Theme 10: Measurement)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - unit of measurement
+      - measuring length
+      - measuring mass
+      - measuring temperature
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g4_sci_push_pull
+    grade: 4
+    subject: science
+    summary: Treat pushes and pulls as forces that can change shape or direction.
+    cisce_page: "PrimaryCurriculum.pdf printed p.176 (Class IV Science, Theme 11: Push and Pull)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - push
+      - pull
+      - force
+    section_exclude_patterns:
+      - friction
+      - magnet
+      - circuit
+      - electricity
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g4_sci_friction
+    grade: 4
+    subject: science
+    summary: Describe friction as a force and how it is used or reduced.
+    cisce_page: "PrimaryCurriculum.pdf printed p.177 (Class IV Science, Theme 12: Friction as a Force)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - friction
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  # --- Class V Science ---
+  - outcome_id: cisce_g5_sci_circulatory
     grade: 5
     subject: science
-    summary: Explain life processes and ecosystems with Grade 5 learner evidence.
-    cisce_page: "PrimaryCurriculum.pdf (Science, Class V; confirm printed page in review)"
+    summary: Describe organs involved in blood circulation.
+    cisce_page: "PrimaryCurriculum.pdf printed p.178 (Class V Science, Theme 1: Human Body: The Circulatory System)"
     mapped_units:
       - unit_01_natural_sciences
       - unit_01_science_oer
     section_patterns:
-      - ecosystem
-      - food web
-      - plant
-      - animal
+      - circulatory
+      - blood
+      - heart
+      - artery
+      - vein
+    section_exclude_patterns:
       - cell
-      - organism
       - habitat
     mapping_granularity: section
     alignment_status: needs_human_review
     reviewer: ""
 
-  - outcome_id: cisce_g5_sci_matter_energy
+  - outcome_id: cisce_g5_sci_skeletal
     grade: 5
     subject: science
-    summary: Use particle ideas, energy transfers and simple investigations of materials.
-    cisce_page: "PrimaryCurriculum.pdf (Science, Class V; confirm printed page in review)"
+    summary: Describe bones, joints and body movement.
+    cisce_page: "PrimaryCurriculum.pdf printed p.179 (Class V Science, Theme 2: Human Body: The Skeletal System)"
     mapped_units:
       - unit_01_natural_sciences
       - unit_01_science_oer
     section_patterns:
-      - energy
-      - particle
-      - electricity
-      - circuit
-      - matter
-      - force
-      - chemical
+      - skeletal
+      - skeleton
+      - bone
+      - joint
     mapping_granularity: section
     alignment_status: needs_human_review
     reviewer: ""
 
-  - outcome_id: cisce_g5_sci_earth_space
+  - outcome_id: cisce_g5_sci_food_health
     grade: 5
     subject: science
-    summary: Connect Earth systems and the solar system to Grade 5 learner text.
-    cisce_page: "PrimaryCurriculum.pdf (Science, Class V; confirm printed page in review)"
+    summary: Relate food habits and lifestyle to health and deficiency diseases.
+    cisce_page: "PrimaryCurriculum.pdf printed p.180 (Class V Science, Theme 3: Food and Health)"
     mapped_units:
       - unit_01_natural_sciences
       - unit_01_science_oer
     section_patterns:
-      - earth
-      - solar
+      - deficiency
+      - balanced diet
+      - lifestyle
+      - communicable
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_sci_pollination
+    grade: 5
+    subject: science
+    summary: Identify parts of a flower and the process of pollination.
+    cisce_page: "PrimaryCurriculum.pdf printed p.182 (Class V Science, Theme 4: Pollination)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - pollination
+      - pollen
+      - stamen
+      - pistil
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_sci_plant_reproduction
+    grade: 5
+    subject: science
+    summary: Describe sexual and vegetative reproduction in plants and seed dispersal.
+    cisce_page: "PrimaryCurriculum.pdf printed p.183 (Class V Science, Theme 5: Plant Reproduction)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - vegetative
+      - seed dispersal
+      - germination
+      - sexual reproduction
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_sci_solids_liquids_gases
+    grade: 5
+    subject: science
+    summary: Compare physical properties of solids, liquids and gases.
+    cisce_page: "PrimaryCurriculum.pdf printed p.184 (Class V Science, Theme 6: Solids, Liquids and Gases)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - solid
+      - liquid
+      - gas
+      - states of matter
+    section_exclude_patterns:
+      - particle theory
+      - chemical
+      - circuit
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_sci_interdependence
+    grade: 5
+    subject: science
+    summary: Describe interdependence of plants and animals, including food chains.
+    cisce_page: "PrimaryCurriculum.pdf printed p.186 (Class V Science, Theme 7: Interdependence in Living Beings)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - food chain
+      - food web
+      - producer
+      - consumer
+      - interdependence
+    section_exclude_patterns:
+      - cell
+      - habitat
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_sci_sound
+    grade: 5
+    subject: science
+    summary: Distinguish sound and noise and ways of reducing noise.
+    cisce_page: "PrimaryCurriculum.pdf printed p.187 (Class V Science, Theme 8: Sound and Noise)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - noise
+      - sound
+      - vibration
+    section_exclude_patterns:
+      - circuit
+      - particle
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_sci_work_energy
+    grade: 5
+    subject: science
+    summary: Relate work and energy and name renewable and non-renewable sources.
+    cisce_page: "PrimaryCurriculum.pdf printed p.188 (Class V Science, Theme 9: Work and Energy)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - work and energy
+      - renewable
+      - non-renewable
+      - kinetic
+      - potential
+    section_exclude_patterns:
+      - circuit
+      - chemical reaction
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_sci_light_shadows
+    grade: 5
+    subject: science
+    summary: Explain shadows, day and night, seasons, Earth's rotation and revolution, and solar and lunar eclipses.
+    cisce_page: "PrimaryCurriculum.pdf printed p.189 (Class V Science, Theme 10: Light and Shadows)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - shadow
+      - opaque
+      - translucent
+      - transparent
+      - day and night
+      - rotation
+      - revolution
+      - eclipse
+      - season
+    section_exclude_patterns:
       - planet
-      - moon
-      - star
-      - space
+      - stars
+      - solar system
       - rock
       - soil
     mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_sci_simple_machines
+    grade: 5
+    subject: science
+    summary: Identify simple machines used in daily life.
+    cisce_page: "PrimaryCurriculum.pdf printed p.190 (Class V Science, Theme 11: Simple Machines)"
+    mapped_units:
+      - unit_01_natural_sciences
+      - unit_01_science_oer
+    section_patterns:
+      - simple machine
+      - lever
+      - pulley
+      - inclined plane
+      - wedge
+      - screw
+    mapping_granularity: section
+    alignment_status: needs_human_review
+    reviewer: ""
+
+  - outcome_id: cisce_g5_sci_cleanliness
+    grade: 5
+    subject: science
+    summary: Reinforce cleanliness and hygiene.
+    cisce_page: "PrimaryCurriculum.pdf printed p.191 (Class V Science, Theme 12: Cleanliness and Hygiene)"
+    mapped_units: []
     alignment_status: needs_human_review
     reviewer: ""

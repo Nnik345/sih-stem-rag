@@ -303,7 +303,7 @@ class TestFullPipeline:
 
     def test_grade3_math_retrieves_engageny_primary(self, retriever):
         response = retriever.retrieve(
-            "what is a unit fraction on a number line",
+            "how do I multiply using equal groups",
             grade=3,
             subject="mathematics",
             rerank=False,
@@ -315,7 +315,6 @@ class TestFullPipeline:
             assert chunk.subject == "mathematics"
             assert chunk.licence
             assert chunk.content_partition != "evaluation_only"
-            assert chunk.cisce_outcome_ids
 
     def test_grade3_science_retrieves_utah_primary(self, retriever):
         response = retriever.retrieve(
@@ -327,13 +326,13 @@ class TestFullPipeline:
             assert chunk.source_role == "primary"
             assert chunk.licence
             assert chunk.content_partition != "evaluation_only"
-            assert "cisce_g3_sci_living_world" not in (chunk.cisce_outcome_ids or []) or "weather" not in (chunk.section_title or "").lower()
+            assert "cisce_g3_sci_living_nonliving" not in (chunk.cisce_outcome_ids or []) or "weather" not in (chunk.section_title or "").lower()
         outcome_sets = [set(c.cisce_outcome_ids or []) for c in response.results]
         assert not any(
             {
-                "cisce_g3_sci_living_world",
-                "cisce_g3_sci_earth_weather",
-                "cisce_g3_sci_forces_materials",
+                "cisce_g3_sci_living_nonliving",
+                "cisce_g3_sci_water",
+                "cisce_g3_sci_matter",
             }
             <= ids
             for ids in outcome_sets

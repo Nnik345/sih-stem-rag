@@ -96,17 +96,25 @@ def test_partition_classifier_blocks_answer_keys():
 
 
 def test_science_mapping_is_section_level_not_whole_book():
-    weather, gran, status = outcome_ids_for(
+    living, gran, status = outcome_ids_for(
+        grade=3,
+        subject="science",
+        unit_slug="unit_01_science_oer",
+        section_title="Living and Non-Living Things",
+        text="A rock is a non-living thing. A bird is a living thing.",
+    )
+    assert gran == "section"
+    assert status == "needs_human_review"
+    assert "cisce_g3_sci_living_nonliving" in living
+    weather, _, weather_status = outcome_ids_for(
         grade=3,
         subject="science",
         unit_slug="unit_01_science_oer",
         section_title="Weather Instruments",
         text="A thermometer measures how hot or cold the weather is.",
     )
-    assert gran == "section"
-    assert status == "needs_human_review"
-    assert "cisce_g3_sci_earth_weather" in weather
-    assert "cisce_g3_sci_living_world" not in weather
+    assert weather == []
+    assert weather_status == "unmapped"
     empty, _, unmapped = outcome_ids_for(
         grade=3,
         subject="science",
@@ -125,7 +133,7 @@ def test_verified_alignment_requires_human_reviewer():
     with pytest.raises(ValueError):
         validate_alignment_row(
             {
-                "outcome_id": "cisce_g3_sci_earth_weather",
+                "outcome_id": "cisce_g3_sci_living_nonliving",
                 "alignment_status": "verified",
                 "reviewer": "",
                 "reviewed_at": "",
@@ -144,22 +152,74 @@ def test_alignment_file_loads_and_is_unverified():
     assert rows
     assert all(row.get("alignment_status") == "needs_human_review" for row in rows)
     assert all(not row.get("reviewer") for row in rows)
-    g3_math, gran, status = outcome_ids_for(
+    ids = {row.get("outcome_id") for row in rows}
+    assert "cisce_g3_math_fractions" not in ids
+    assert "cisce_g3_sci_earth_weather" not in ids
+    assert "cisce_g4_sci_earth" not in ids
+    data, gran, status = outcome_ids_for(
+        grade=3,
+        subject="mathematics",
+        unit_slug="module_06_collecting",
+        section_title="Tally marks and picture graphs",
+        text="Record the data using tally marks and draw a pictograph.",
+    )
+    assert "cisce_g3_math_data" in data
+    assert gran == "section"
+    assert status == "needs_human_review"
+    none, _, unmapped = outcome_ids_for(
         grade=3, subject="mathematics", unit_slug="module_05_fractions"
     )
-    assert "cisce_g3_math_fractions" in g3_math
-    assert gran == "unit"
-    assert status == "needs_human_review"
+    assert none == []
+    assert unmapped == "unmapped"
 
 
 def test_alignment_matches_truncated_and_full_slugs():
     full = "module_03_multiplication_and_division_with_units_of_0_1_6_9_and_multip"
-    ids, _, _ = outcome_ids_for(grade=3, subject="mathematics", unit_slug=full)
-    assert "cisce_g3_math_number_operations" in ids
-    prefix, _, _ = outcome_ids_for(
-        grade=4, subject="mathematics", unit_slug="module_06_decimal"
+    ids, _, _ = outcome_ids_for(
+        grade=3,
+        subject="mathematics",
+        unit_slug=full,
+        section_title="Multiplication as equal groups",
+        text="Students use arrays and grouping for multiplication and division.",
     )
-    assert "cisce_g4_math_fractions_decimals" in prefix
+    assert "cisce_g3_math_number_operations" in ids
+    decimals, _, unmapped = outcome_ids_for(
+        grade=4,
+        subject="mathematics",
+        unit_slug="module_06_decimal",
+        section_title="Tenths and hundredths",
+        text="Write tenths as decimal fractions.",
+    )
+    assert decimals == []
+    assert unmapped == "unmapped"
+    fractions, gran, _ = outcome_ids_for(
+        grade=4,
+        subject="mathematics",
+        unit_slug="module_05_fraction_equivalence",
+        section_title="Equivalent fractions",
+        text="Add like fractions that share a denominator.",
+    )
+    assert "cisce_g4_math_fractions" in fractions
+    assert gran == "section"
+
+
+def test_rounding_sections_are_excluded_from_class_iv_place_value():
+    ids, _, _ = outcome_ids_for(
+        grade=4,
+        subject="mathematics",
+        unit_slug="module_01_place_value_rounding",
+        section_title="Rounding to the nearest hundred",
+        text="Round 4,562 to the nearest hundred using place value.",
+    )
+    assert "cisce_g4_math_place_value" not in ids
+    kept, _, _ = outcome_ids_for(
+        grade=4,
+        subject="mathematics",
+        unit_slug="module_01_place_value_rounding",
+        section_title="Place value of six-digit numbers",
+        text="Write a six-digit number in expanded form using place value.",
+    )
+    assert "cisce_g4_math_place_value" in kept
 
 
 def test_no_core_knowledge_in_repo_config_and_scripts():

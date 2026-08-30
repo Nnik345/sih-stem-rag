@@ -110,7 +110,9 @@ def outcome_ids_for(
     """Return (outcome_ids, granularity, alignment_status).
 
     When an outcome lists ``section_patterns``, the section title or body must
-    match at least one pattern. Math modules without patterns stay unit-level.
+    match at least one pattern. ``section_exclude_patterns`` drop a match even
+    if an allowlist pattern also hits. Math modules without patterns stay
+    unit-level. Outcomes with empty ``mapped_units`` never attach.
     """
     matches: list[str] = []
     granularities: list[str] = []
@@ -124,6 +126,12 @@ def outcome_ids_for(
         if not isinstance(mapped, list):
             mapped = [mapped]
         if not any(_unit_matches(unit_slug, str(item)) for item in mapped):
+            continue
+        excludes = row.get("section_exclude_patterns") or []
+        if not isinstance(excludes, list):
+            excludes = [excludes]
+        excludes = [str(p).strip().lower() for p in excludes if str(p).strip()]
+        if excludes and any(p in haystack for p in excludes):
             continue
         patterns = row.get("section_patterns") or []
         if not isinstance(patterns, list):
