@@ -39,7 +39,7 @@ export function QueryPanel({ form, errors, running, onChange, onSubmit }: Props)
           value={form.query}
           onChange={(e) => update("query", e.target.value)}
           rows={3}
-          placeholder="how does weather change from day to day"
+          placeholder="what are the components of food"
             aria-invalid={Boolean(shown.query)}
         />
         {shown.query ? <span className="field-error">{shown.query}</span> : null}
@@ -49,9 +49,11 @@ export function QueryPanel({ form, errors, running, onChange, onSubmit }: Props)
           Grade
           <select value={form.grade} onChange={(e) => update("grade", e.target.value)}>
             <option value="">Any</option>
-            <option value="3">3</option>
-            <option value="4">4</option>
-            <option value="5">5</option>
+            {Array.from({ length: 12 }, (_, i) => String(i + 1)).map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
           </select>
           {shown.grade ? <span className="field-error">{shown.grade}</span> : null}
         </label>

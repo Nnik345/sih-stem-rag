@@ -5,10 +5,9 @@ Order of operations is enforced: retrieval and the evidence gate run *before* th
 generator is loaded, and when evidence is insufficient the generator is either
 skipped entirely (--strict) or asked to decline rather than invent an answer.
 
-    python scripts/test_rag.py                                    # interactive
-    python scripts/test_rag.py -q "how do plants make food" -g 4 -s science
-    python scripts/test_rag.py -q "what is a unit fraction" -g 3 -s mathematics --strict
-    python scripts/test_rag.py -q "how do I find the area of a rectangle" -g 3 -s mathematics --retrieval-only
+    python scripts/test_rag.py -q "what are the components of food" -g 6 -s science
+    python scripts/test_rag.py -q "how does light reflect" -g 10 -s science --strict
+    python scripts/test_rag.py -q "what is electrostatics" -g 12 -s science --retrieval-only
 """
 
 from __future__ import annotations

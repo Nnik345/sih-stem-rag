@@ -1,9 +1,11 @@
 # SIH STEM RAG
 
 Local research project building a **hallucination-resistant Socratic STEM tutor**
-over a CISCE-aligned Grade 3–5 STEM corpus (EngageNY Mathematics, Siyavula
-Natural Sciences, and Utah Science OER). CISCE is used only as an alignment
-authority and is never ingested.
+over official English-medium **NCERT** Mathematics and Science textbooks for
+**CBSE classes 1–12** (EVS in the primary years; Physics, Chemistry and Biology
+in classes 11–12). NCERT books *are* the CBSE curriculum here: they are both
+the ingested corpus and the alignment authority. There is no CISCE layer and
+no separate CBSE syllabus PDF.
 
 The system implements hybrid GraphRAG retrieval on a local Neo4j instance, feeding a
 locally hosted Qwen3-VL-8B-Instruct generator that is instructed to tutor rather
@@ -58,9 +60,8 @@ Set `NEO4J_PASSWORD` in `.env` to a real password (not `change-me`).
 
 ### 3. Curriculum PDFs
 
-EngageNY Grade 3–5 Mathematics **must be downloaded by hand** (NYSED SharePoint
-requires a Microsoft login). Then run the automated downloader for Siyavula,
-Utah, and the CISCE alignment PDF. See [Dataset](#dataset).
+Download the official English NCERT STEM textbooks from ncert.nic.in. See
+[Dataset](#dataset).
 
 ```bash
 python scripts/download_curriculum.py
@@ -110,7 +111,7 @@ python scripts/run_visualizer.py
 ```
 
 The browser opens `http://127.0.0.1:8000`. Submit a query such as
-`how does weather change` with grade `3` and
+`what are the components of food` with grade `6` and
 subject `science`. Use retrieval-only first if you do not want to load Qwen.
 
 Optional launcher flags: `--host`, `--port`, `--reload`, `--no-browser`.
@@ -132,16 +133,16 @@ Neo4j must still be running (`./scripts/neo4j_local.sh start`).
 
 ```bash
 python scripts/test_retriever.py \
-    --query "what is a unit fraction" \
-    --grade 3 --subject mathematics
+    --query "what are the components of food" \
+    --grade 6 --subject science
 
 python scripts/test_rag.py \
-    --query "how does weather change" \
-    --grade 3 --subject science
+    --query "how does light reflect from a plane mirror" \
+    --grade 10 --subject science
 
 python scripts/test_rag.py \
-    --query "how do plants make food" \
-    --grade 4 --subject science --retrieval-only
+    --query "what is electrostatics" \
+    --grade 12 --subject science --retrieval-only
 ```
 
 ### 9. Tests
@@ -181,35 +182,15 @@ Neo4j and by every script that connects to the database.
 
 ### 3. Curriculum sources
 
-EngageNY Mathematics Grade 3–5 full-module PDFs **cannot be fetched by the
-automated downloader**. NYSED hosts them behind SharePoint (Microsoft login).
-Placing those 20 PDFs is a required setup step, not optional.
-
-1. Open an official NYSED page and sign in if prompted:
-   - https://www.nysed.gov/edtech/digital-content-resources-mathematics
-   - https://www.nysed.gov/standards-instruction/standards-resources-and-supports
-   - SharePoint folder: https://nysed.sharepoint.com/:f:/s/P12EngageNY-Math-EXTA/En7SIs8H6v5PlQbP8fYWQbkBvFl7pdadxm5WQe2RYn6C_Q?e=aA13JQ
-2. Download Grade 3, Grade 4 and Grade 5 Mathematics. Keep only
-   `math-gN-mN-full-module.pdf` (20 files: G3 M1–7, G4 M1–7, G5 M1–6). Skip
-   assessments, answer keys, lesson zips and Internet Archive copies.
-3. Copy each PDF to the catalog path, for example:
-
-```
-curriculum/raw/engageny/mathematics/grade_03/module_01_properties_of_multiplication_and_division/student/math-g3-m1-full-module.pdf
-```
-
-Expected filenames are `math-g{3,4,5}-m{1…}-full-module.pdf` under the matching
-`grade_XX/module_…/student/` directory listed in
-`src/rag/curriculum_catalog.py`.
-
-4. Then fetch everything the script *can* download (Siyavula, Utah, CISCE
-   alignment PDF). Existing valid files are skipped:
+Fetch official English NCERT STEM textbooks from
+[ncert.nic.in/textbook.php](https://ncert.nic.in/textbook.php). Only catalog
+URLs are used; there is no login and no unofficial mirror.
 
 ```bash
 python scripts/download_curriculum.py
 ```
 
-Output: `curriculum/raw/` (git-ignored). Details in [Dataset](#dataset).
+Output: `curriculum/raw/ncert/` (git-ignored). Details in [Dataset](#dataset).
 
 ### 4. Retrieval models (~4.6 GB total)
 
@@ -271,12 +252,12 @@ manifests, cache) and populates Neo4j. Re-running is idempotent unless you pass
 
 ```bash
 python scripts/test_retriever.py \
-    --query "what is a unit fraction" \
-    --grade 3 --subject mathematics
+    --query "what are the components of food" \
+    --grade 6 --subject science
 
 python scripts/test_rag.py \
-    --query "how does weather change" \
-    --grade 3 --subject science
+    --query "how does light reflect from a plane mirror" \
+    --grade 10 --subject science
 
 python scripts/test_generator.py
 python -m pytest tests/ -q
@@ -292,7 +273,7 @@ or use the table below to restore individual pieces.
 
 | Gitignored path | How to recreate | Size (approx.) |
 |-----------------|-----------------|----------------|
-| `curriculum/raw/` | Manual EngageNY full-module PDFs (see [Dataset](#dataset)), then `python scripts/download_curriculum.py` | several hundred MB |
+| `curriculum/raw/` | `python scripts/download_curriculum.py` (official NCERT zips) | several hundred MB |
 | `models/bge-m3/` | `python scripts/download_retrieval_models.py` | ~2.3 GB |
 | `models/bge-reranker-v2-m3/` | same script | ~2.3 GB |
 | `models/qwen3-vl-8b-instruct/` | `huggingface-cli download Qwen/Qwen3-VL-8B-Instruct --local-dir models/qwen3-vl-8b-instruct` | ~17 GB |
@@ -367,21 +348,27 @@ The curriculum downloader itself needs no third-party packages.
 
 ## Dataset
 
-Supported grades are **3, 4 and 5 only**. CISCE is the alignment authority and is
-**not ingested**, embedded, or retrieved.
+Supported grades are **1–12**. The corpus is official English NCERT STEM
+textbooks that implement the **CBSE** curriculum. NCERT is both the ingested
+source and the alignment authority (`source_id = ncert_textbook`). There is no
+separate CBSE syllabus PDF and no CISCE layer.
 
-| Source | Grades | Subject | Role | Licence |
-| ------ | -----: | ------- | ---- | ------- |
-| CISCE Primary Curriculum | 3–5 | Mathematics and Science | Alignment only | CISCE terms; PDF not in Neo4j |
-| EngageNY Mathematics | 3–5 | Mathematics | Primary | CC BY-NC-SA |
-| Siyavula Natural Sciences (learner ePUB, CC-BY) | 4–5 | Science | Primary | CC BY |
-| Utah Science OER | 3 | Science | Primary | Mixed OER notices (may include noncommercial terms) |
-| Utah Science OER | 4–5 | Science | Support | Mixed OER notices (may include noncommercial terms) |
+Physics, Chemistry, Biology and primary EVS ingest as `science`, with
+`unit_slug` naming the book (for example `physics_part_1`).
 
-Grade 3 Science uses Utah OER as primary because Siyavula begins at Grade 4.
-EngageNY teacher solutions and answer keys are classified `evaluation_only` and
-never enter production retrieval. Noncommercial restrictions apply to EngageNY
-and may apply to portions of Utah content.
+| Classes | Mathematics | Science |
+| ------: | ----------- | ------- |
+| 1–2 | Joyful Mathematics | — |
+| 3–5 | Maths Mela | Our Wondrous World (EVS) |
+| 6 | Ganita Prakash | Curiosity |
+| 7–8 | Ganita Prakash (parts) | Curiosity |
+| 9 | Ganita Manjari | Exploration |
+| 10 | Mathematics | Science |
+| 11–12 | Mathematics (parts) | Physics, Chemistry, Biology (parts) |
+
+Hindi/Urdu editions, Exemplar Problems, Lab Manuals, covers, and **Answers**
+PDFs are not ingested. Unsolved `Exercises` / `Let’s practise` sections are
+`practice_only`; answer keys are `evaluation_only`.
 
 ### Run the downloader
 
@@ -389,73 +376,49 @@ and may apply to portions of Utah content.
 python scripts/download_curriculum.py
 ```
 
-Only the URLs in `src/rag/curriculum_catalog.py` are used. There is no login and
-no mirror fallback. Valid files are skipped on re-run. SHA-256 hashes are
-written to `curriculum/manifests/sources.yaml` and
+Only URLs in `src/rag/curriculum_catalog.py` on `ncert.nic.in` are used. There
+is no login and no mirror fallback. Valid chapter directories are skipped on
+re-run. SHA-256 hashes are written to `curriculum/manifests/sources.yaml` and
 `curriculum/manifests/checksums.sha256`.
 
-**EngageNY must be downloaded manually.** NYSED public pages point at a
-SharePoint folder that requires a Microsoft login, so
-`scripts/download_curriculum.py` will not retrieve those PDFs. If the 20
-full-module files are already in `curriculum/raw/engageny/`, the script skips
-them. If they are missing, it tells you where to put them.
+Each book is the official complete-book zip
+(`https://ncert.nic.in/textbook/pdf/{code}dd.zip`). Chapter PDFs extract to:
 
-Required files (CC BY-NC-SA; local research only):
-
-| Grade | Modules | Filename pattern |
-| ----- | ------: | ---------------- |
-| 3 | 1–7 | `math-g3-mN-full-module.pdf` |
-| 4 | 1–7 | `math-g4-mN-full-module.pdf` |
-| 5 | 1–6 | `math-g5-mN-full-module.pdf` |
-
-Official starting pages:
-
-- https://www.nysed.gov/edtech/digital-content-resources-mathematics
-- https://www.nysed.gov/standards-instruction/standards-resources-and-supports
-- https://www.nysed.gov/curriculum-instruction/engageny
-- SharePoint: https://nysed.sharepoint.com/:f:/s/P12EngageNY-Math-EXTA/En7SIs8H6v5PlQbP8fYWQbkBvFl7pdadxm5WQe2RYn6C_Q?e=aA13JQ
-
-Do not use Internet Archive or other unofficial mirrors. After copying the PDFs
-into the catalog paths, re-run the downloader (to record hashes) and ingest:
-
-```bash
-python scripts/download_curriculum.py
-python scripts/ingest_corpus.py
 ```
+curriculum/raw/ncert/{subject}/grade_{nn}/{book_slug}/student/
+```
+
+Ingest creates **one Document per chapter PDF**.
+
+Official page: https://ncert.nic.in/textbook.php
+
+Do not use Internet Archive, Vedantu, or other unofficial mirrors.
 
 Layout:
 
 ```
 curriculum/
 ├── manifests/sources.yaml
-├── alignment/cisce_grade_3_5_stem.yaml
-├── raw/          git-ignored downloads
+├── raw/ncert/    git-ignored downloads
 └── processed/    git-ignored ingest artefacts
 ```
-
-The CISCE PDF is stored under `curriculum/raw/_alignment_only/` for local
-alignment authoring and is never ingested.
 
 ### Replace the old graph, then ingest
 
 ```bash
-python scripts/replace_corpus.py --purge-core-knowledge --yes
-python scripts/replace_corpus.py --purge-all-curriculum --yes   # explicit full wipe
+python scripts/replace_corpus.py --purge-all-curriculum --yes
+python scripts/download_curriculum.py
 python scripts/ingest_corpus.py
 ```
 
-Ordinary ingestion does not delete the graph.
+Ordinary ingestion does not delete the graph. A full NCERT ingest is much
+larger than the old 25-document corpus and may take hours.
 
 ### Important notes
 
 - Materials are for **local research use only**.
-- EngageNY is CC BY-NC-SA; do not use it commercially.
-- Utah textbooks mix CK-12 and other notices; images without a clear licence
-  are skipped.
-- Siyavula learner ePUBs are CC BY; branded ND PDFs are not used.
-- All CISCE mappings are `needs_human_review` until a reviewer signs them.
-  A PDF review rewrote the draft crosswalk; it is not approved for
-  `ALIGN_STRICT`.
+- NCERT textbooks are copyrighted; use the official ncert.nic.in files only.
+- `--strict` / `alignment_strict` keeps retrieval on `source_id = ncert_textbook`.
 
 ## Models
 
@@ -641,8 +604,8 @@ All IDs are deterministic, which is what makes ingestion idempotent:
 ```
 grade_id    grade_03
 subject_id  grade_03:science
-unit_id     grade_03:science:unit_01_science_oer
-document_id <unit_id>:student:student_reader
+unit_id     grade_06:science:curiosity
+document_id <unit_id>:student:fecu101
 page_id     <document_id>:p0007
 section_id  <document_id>:s0003
 chunk_id    <section_id>:c0001
@@ -715,7 +678,7 @@ is preserved.
 ### 1. Metadata filtering
 
 ```python
-retriever.retrieve("what is a unit fraction", grade=3, subject="mathematics")
+retriever.retrieve("what are the components of food", grade=6, subject="science")
 ```
 
 `grade`, `subject`, `unit`, `resource_type`, `audience` and `document_id` are
@@ -827,16 +790,13 @@ Run all commands from the repository root.
 
 ### 1. Download curriculum sources
 
-EngageNY Grade 3–5 full-module PDFs must be copied in by hand first (SharePoint
-login). Paths and official pages are in [Dataset](#dataset). Then:
-
 ```bash
 python scripts/download_curriculum.py
 ```
 
-Fetches Siyavula, Utah, and the CISCE alignment PDF. Existing valid files,
-including local EngageNY PDFs, are skipped. If EngageNY files are missing, the
-script prints the expected destination paths and exits with an error.
+Fetches official English NCERT STEM complete-book zips from ncert.nic.in and
+extracts chapter PDFs. Existing valid chapter directories are skipped. See
+[Dataset](#dataset).
 
 ### 2. Download the retrieval models
 
@@ -895,7 +855,7 @@ python scripts/ingest_corpus.py --reset --yes                 # skip prompt
 ```bash
 python scripts/inspect_graph.py
 python scripts/inspect_graph.py --units
-python scripts/inspect_graph.py --unit grade_03:science:unit_01_science_oer
+python scripts/inspect_graph.py --unit grade_06:science:curiosity
 python scripts/inspect_graph.py --chunk "<chunk_id>"
 python scripts/inspect_graph.py --concepts 30
 python scripts/inspect_graph.py --images 10
@@ -904,7 +864,7 @@ python scripts/inspect_graph.py --images 10
 ### 7. Test retrieval (no generator)
 
 ```bash
-python scripts/test_retriever.py --query "what is a unit fraction" --grade 3 --subject mathematics
+python scripts/test_retriever.py --query "what are the components of food" --grade 6 --subject science
 ```
 
 Prints dense, full-text, graph, fused and reranked results side by side with per
@@ -916,10 +876,10 @@ the generator. Useful flags: `-q`/`--query`, `-g`/`--grade`, `-s`/`--subject`,
 ### 8. Test the full RAG pipeline
 
 ```bash
-python scripts/test_rag.py --query "how does weather change" --grade 3 --subject science
-python scripts/test_rag.py --query "how does weather change" --grade 3 --subject science --state GIVE_HINT
-python scripts/test_rag.py --query "what is a unit fraction" --grade 3 --subject mathematics --strict
-python scripts/test_rag.py --query "how do I find the area of a rectangle" --grade 3 --subject mathematics --retrieval-only
+python scripts/test_rag.py --query "what are the components of food" --grade 6 --subject science
+python scripts/test_rag.py --query "what are the components of food" --grade 6 --subject science --state GIVE_HINT
+python scripts/test_rag.py --query "how does light reflect from a plane mirror" --grade 10 --subject science --strict
+python scripts/test_rag.py --query "what is electrostatics" --grade 12 --subject science --retrieval-only
 ```
 
 Runs filtering, all three channels, fusion, reranking and the evidence gate,
@@ -934,7 +894,7 @@ Omit `-q`/`--query` (and optionally `-g`/`-s`) to be prompted interactively.
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `-q`, `--query` | *(prompt)* | Student question |
-| `-g`, `--grade` | any | Grade filter (`3`, `4`, or `5`) |
+| `-g`, `--grade` | any | Grade filter (`1`–`12`) |
 | `-s`, `--subject` | any | `science` or `mathematics` |
 | `-u`, `--unit` | any | Restrict retrieval to one unit id |
 | `--state` | `ASK_QUESTION` | Tutoring move (see table below) |

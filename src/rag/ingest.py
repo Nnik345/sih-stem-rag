@@ -32,7 +32,7 @@ from .concepts import (
     build_vocabulary,
     mentions_from_own_titles,
 )
-from .alignment import outcome_ids_for
+from .curriculum_catalog import ALIGNMENT_STATUS_NATIVE
 from .config import RagConfig
 from .corpus import discover_documents
 from .embeddings import BGEM3Embedder, EmbeddingError
@@ -58,7 +58,8 @@ LOGGER = get_logger(__name__)
 #       than the overlap budget, and alpha-channel images are saved as PNG
 #       instead of being skipped.
 #   v4: section-aware partitions, boilerplate/practice exclusion, granular CISCE.
-INGEST_VERSION = "ingest-v4"
+#   v5: NCERT chapter PDFs; native CBSE/NCERT alignment (no CISCE YAML).
+INGEST_VERSION = "ingest-v5"
 
 # Ceiling on MENTIONS edges per concept, to stop a common term from becoming a
 # hub node that graph expansion would traverse into uselessly.
@@ -835,16 +836,9 @@ class CorpusIngestor:
             )
             previous_title = chunk.section_title
             chunk.content_partition = decision.partition
-            outcome_ids, granularity, status = outcome_ids_for(
-                grade=chunk.grade,
-                subject=chunk.subject,
-                unit_slug=metadata.unit_slug,
-                section_title=chunk.section_title,
-                text=chunk.text,
-            )
-            chunk.cisce_outcome_ids = outcome_ids
-            chunk.mapping_granularity = granularity
-            chunk.alignment_status = status
+            chunk.cisce_outcome_ids = []
+            chunk.mapping_granularity = "none"
+            chunk.alignment_status = ALIGNMENT_STATUS_NATIVE
             if decision.partition == EVALUATION_ONLY:
                 self.stats.chunks_excluded_evaluation += 1
                 self.stats.chunks_excluded_partition += 1

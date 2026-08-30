@@ -124,7 +124,7 @@ class TestRuns:
         assert response.status_code == 422
 
     def test_validation_rejects_bad_grade(self, client):
-        response = client.post("/api/runs", json={"query": "how does weather change", "grade": 9})
+        response = client.post("/api/runs", json={"query": "what are the components of food", "grade": 13})
         assert response.status_code == 422
 
     def test_validation_rejects_bad_subject(self, client):

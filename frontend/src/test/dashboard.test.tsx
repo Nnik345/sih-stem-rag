@@ -90,8 +90,9 @@ function node(partial: Partial<GraphNode> & Pick<GraphNode, "node_id">): GraphNo
 }
 
 describe("query validation", () => {
-  it("rejects an empty question", () => {
-    expect(validateQueryForm({ ...EMPTY_FORM, query: "  " }).query).toMatch(/question/i);
+  it("rejects a grade outside 1-12", () => {
+    expect(validateQueryForm({ ...EMPTY_FORM, query: "food", grade: "13" }).grade).toMatch(/1 through 12/i);
+    expect(validateQueryForm({ ...EMPTY_FORM, query: "food", grade: "6" }).grade).toBeUndefined();
   });
 
   it("shows a validation error in the form", async () => {

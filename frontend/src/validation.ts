@@ -5,8 +5,9 @@ export function validateQueryForm(form: QueryFormState): Record<string, string> 
   if (!form.query.trim()) {
     errors.query = "Enter a student question.";
   }
-  if (form.grade && !["3", "4", "5"].includes(form.grade)) {
-    errors.grade = "Grade must be 3, 4, or 5.";
+  const gradeNum = Number(form.grade);
+  if (form.grade && (!Number.isInteger(gradeNum) || gradeNum < 1 || gradeNum > 12)) {
+    errors.grade = "Grade must be 1 through 12.";
   }
   if (form.subject && !["science", "mathematics"].includes(form.subject)) {
     errors.subject = "Subject must be science or mathematics.";

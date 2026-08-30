@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Ingest the Grade 3–5 STEM corpus into the Neo4j curriculum graph.
+"""Ingest the CBSE/NCERT STEM corpus into the Neo4j curriculum graph.
 
-Steps: discover catalog files -> parse PDF/ePUB -> hierarchical chunks -> graph
+Steps: discover chapter PDFs -> parse PDF/ePUB -> hierarchical chunks -> graph
 nodes and relationships -> conservative concept links -> BGE-M3 dense
 embeddings.
 
@@ -10,7 +10,7 @@ skipped, so an interrupted run resumes simply by re-running the same command.
 Nothing is deleted without an explicit replacement command.
 
     python scripts/ingest_corpus.py
-    python scripts/ingest_corpus.py --grade 3 --subject science
+    python scripts/ingest_corpus.py --grade 6 --subject science
     python scripts/ingest_corpus.py --limit 5
     python scripts/ingest_corpus.py --force
     python scripts/ingest_corpus.py --skip-embeddings

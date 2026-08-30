@@ -33,7 +33,8 @@ _EVAL_NAME_RE = re.compile(
     r"(answer[\s_-]*key|worked[\s_-]*solution|marking[\s_-]*guide|"
     r"scoring[\s_-]*rubric|end[\s_-]*of[\s_-]*module[\s_-]*assessment|"
     r"mid[\s_-]*module[\s_-]*assessment|exit[\s_-]*ticket[\s_-]*sample|"
-    r"sprint[\s_-]*answers?|homework[\s_-]*answers?)",
+    r"sprint[\s_-]*answers?|homework[\s_-]*answers?|"
+    r"an\.pdf$)",
     re.IGNORECASE,
 )
 
@@ -42,14 +43,17 @@ _EVAL_HEADING_RE = re.compile(
     r"mid[\s-]*module\s+assessment|end[\s-]*of[\s-]*module\s+assessment|"
     r"assessment\s+(task|summary)|evaluation\s+rubric|possible\s+solutions?|"
     r"exit\s+ticket\s+(sample|answers?)|homework\s+(answer|solution)|"
-    r"marking\s+guide|scoring\s+rubric|\bsolutions?\b)",
+    r"marking\s+guide|scoring\s+rubric|\bsolutions?\b|"
+    r"^answers$|^answers\s+(to|of)\b)",
     re.IGNORECASE,
 )
 
 _PRACTICE_HEADING_RE = re.compile(
     r"(exit\s+ticket|homework|problem\s+set|sprint\b|problem\s+set|"
     r"practice\s+set|fluency\s+sprints?|application\s+problem|"
-    r"unsolved|independent\s+practice)",
+    r"unsolved|independent\s+practice|"
+    r"^exercises?\b|let['’]?s\s+practi[sc]e|let\s+us\s+practi[sc]e|"
+    r"try\s+these)",
     re.IGNORECASE,
 )
 
@@ -76,7 +80,8 @@ _BOILERPLATE_BODY_RE = re.compile(
     r"great minds\.?\s*eureka-math|"
     r"nys common core|"
     r"https?://creativecommons\.org|"
-    r"https?://www\.engageny\.org|"
+    r"https?://ncert\.nic\.in|"
+    r"national council of educational research|"
     r"https?://greatminds\.org)",
     re.IGNORECASE,
 )

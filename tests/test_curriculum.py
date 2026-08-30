@@ -1,18 +1,20 @@
-"""Curriculum catalog, partitions, alignment and download safety."""
+"""Curriculum catalog, partitions, and download safety for CBSE/NCERT STEM."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from rag.alignment import load_alignment, outcome_ids_for
+from rag.alignment import load_alignment, outcome_ids_for, validate_alignment_row
 from rag.curriculum_catalog import (
-    SOURCE_CISCE,
-    SOURCE_ENGAGENY,
-    SOURCE_SIYAVULA,
-    SOURCE_UTAH,
+    NCERT_BOOKS,
+    SOURCE_NCERT,
     SUPPORTED_GRADES,
+    SUPPORTED_SUBJECTS,
     all_source_files,
     ingestible_files,
+    is_answers_member,
+    is_chapter_pdf,
+    ncert_zip_url,
 )
 from rag.partitions import (
     EVALUATION_ONLY,
@@ -26,66 +28,107 @@ from rag.partitions import (
 )
 
 
-def test_supported_grades_are_three_to_five_only():
-    assert SUPPORTED_GRADES == (3, 4, 5)
+def test_supported_grades_are_one_to_twelve():
+    assert SUPPORTED_GRADES == tuple(range(1, 13))
+    assert SUPPORTED_SUBJECTS == ("mathematics", "science")
     for record in ingestible_files():
         assert record.grade in SUPPORTED_GRADES
+        assert record.subject in SUPPORTED_SUBJECTS
 
 
-def test_catalog_has_required_sources_and_no_core_knowledge():
+def test_catalog_is_ncert_only_english_stem():
     records = all_source_files()
-    ids = {item.source_id for item in records}
-    assert {SOURCE_ENGAGENY, SOURCE_SIYAVULA, SOURCE_UTAH, SOURCE_CISCE} <= ids
-    blob = " ".join(f"{item.source_id} {item.publisher} {item.local_path}" for item in records)
-    assert "core knowledge" not in blob.lower()
-    assert "core_knowledge" not in blob.lower()
+    assert records
+    assert {item.source_id for item in records} == {SOURCE_NCERT}
+    assert all(item.ingest and not item.alignment_only for item in records)
+    assert all(item.source_role == "primary" for item in records)
+    blob = " ".join(
+        f"{item.source_id} {item.publisher} {item.local_path} {item.unit_title}"
+        for item in records
+    ).lower()
+    assert "core knowledge" not in blob
+    assert "cisce" not in blob
+    assert "engageny" not in blob
+    assert "siyavula" not in blob
+    assert "utah" not in blob
+    for item in records:
+        assert item.direct_download_url.startswith("https://ncert.nic.in/")
+        assert item.ncert_code
+        assert "/ncert/" in item.local_path
+        assert "copyright" in item.licence.lower()
+        assert "CC BY" not in item.licence
 
 
-def test_cisce_is_alignment_only_and_not_ingestible():
-    cisce = [item for item in all_source_files() if item.source_id == SOURCE_CISCE]
-    assert cisce
-    assert all(item.alignment_only and not item.ingest for item in cisce)
-    assert all(item not in ingestible_files() for item in cisce)
+def test_classes_1_2_are_maths_only():
+    by_grade = {}
+    for item in ingestible_files():
+        by_grade.setdefault(item.grade, set()).add(item.subject)
+    assert by_grade[1] == {"mathematics"}
+    assert by_grade[2] == {"mathematics"}
+    for grade in range(3, 13):
+        assert "mathematics" in by_grade[grade]
+        assert "science" in by_grade[grade]
 
 
-def test_utah_roles_and_image_policy():
-    utah = [item for item in ingestible_files() if item.source_id == SOURCE_UTAH]
-    g3 = next(item for item in utah if item.grade == 3)
-    g4 = next(item for item in utah if item.grade == 4)
-    g5 = next(item for item in utah if item.grade == 5)
-    assert g3.source_role == "primary"
-    assert g4.source_role == "support"
-    assert g5.source_role == "support"
-    assert all(not item.extract_images for item in utah)
+def test_senior_secondary_science_uses_pcb_unit_slugs():
+    slugs = {
+        (item.grade, item.unit_slug)
+        for item in ingestible_files()
+        if item.grade in (11, 12) and item.subject == "science"
+    }
+    assert (11, "physics_part_1") in slugs
+    assert (11, "chemistry_part_2") in slugs
+    assert (11, "biology") in slugs
+    assert (12, "physics_part_2") in slugs
+    assert (12, "chemistry_part_1") in slugs
+    assert (12, "biology") in slugs
 
 
-def test_siyavula_starts_at_grade_4():
-    siyavula = [item for item in ingestible_files() if item.source_id == SOURCE_SIYAVULA]
-    assert {item.grade for item in siyavula} == {4, 5}
-    assert all(item.source_role == "primary" for item in siyavula)
-    assert all(item.file_format == "epub" for item in siyavula)
-    assert all("CC-BY" in item.local_path or "CC-BY" in item.direct_download_url for item in siyavula)
+def test_class_6_science_is_curiosity_ncf():
+    g6 = next(
+        item
+        for item in ingestible_files()
+        if item.grade == 6 and item.subject == "science"
+    )
+    assert g6.unit_title == "Curiosity"
+    assert g6.unit_slug == "curiosity"
+    assert g6.ncert_code == "fecu1"
 
 
-def test_engageny_is_primary_math_with_nc_licence():
-    math = [item for item in ingestible_files() if item.source_id == SOURCE_ENGAGENY]
-    assert {item.grade for item in math} == {3, 4, 5}
-    assert all(item.subject == "mathematics" for item in math)
-    assert all(item.source_role == "primary" for item in math)
-    assert all("NC" in item.licence for item in math)
+def test_book_codes_match_official_zip_pattern():
+    codes = {book.code for book in NCERT_BOOKS}
+    assert len(codes) == len(NCERT_BOOKS)
+    for book in NCERT_BOOKS:
+        assert ncert_zip_url(book.code) == f"https://ncert.nic.in/textbook/pdf/{book.code}dd.zip"
 
 
-def test_partition_classifier_blocks_answer_keys():
+def test_chapter_pdf_helper_skips_answers_and_covers():
+    assert is_chapter_pdf("aejm101.pdf", "aejm1")
+    assert is_chapter_pdf("folder/keph201.pdf", "keph2")
+    assert not is_chapter_pdf("aejm1an.pdf", "aejm1")
+    assert not is_chapter_pdf("cover.jpg", "aejm1")
+    assert not is_chapter_pdf("aejm1ps.pdf", "aejm1")
+    assert is_answers_member("jemh1an.pdf")
+    assert is_answers_member("answers.pdf")
+
+
+def test_partition_classifier_blocks_answer_keys_and_ncert_exercises():
     assert partition_from_filename("math-g3-m1-end-of-module-assessment.pdf") == EVALUATION_ONLY
+    assert partition_from_filename("jemh1an.pdf") == EVALUATION_ONLY
     assert partition_from_heading("Answer Key") == EVALUATION_ONLY
-    assert partition_from_heading("Lesson 12 Answer Key") == EVALUATION_ONLY
-    assert partition_from_heading("Mid-Module Assessment Task") == EVALUATION_ONLY
-    assert partition_from_heading("End-of-Module Assessment Task") == EVALUATION_ONLY
-    assert partition_from_heading("Exit Ticket (3 minutes)") == PRACTICE_ONLY
-    assert partition_from_heading("Homework") == PRACTICE_ONLY
+    assert partition_from_heading("Answers") == EVALUATION_ONLY
+    assert partition_from_heading("Exercises") == PRACTICE_ONLY
+    assert partition_from_heading("Let’s practise") == PRACTICE_ONLY
+    assert partition_from_heading("Let's practise") == PRACTICE_ONLY
     assert partition_from_heading("Concept Development") == TEACHER_STRATEGY
-    assert partition_from_heading("Fractions on a number line") == STUDENT_EVIDENCE
-    assert classify_section("Credits", "This work is licensed under a Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License.").partition == EXCLUDED_BOILERPLATE
+    assert partition_from_heading("Components of food") == STUDENT_EVIDENCE
+    assert (
+        classify_section(
+            "Credits",
+            "This work is licensed under a Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License.",
+        ).partition
+        == EXCLUDED_BOILERPLATE
+    )
     assert (
         classify_section(
             "Exit Ticket",
@@ -95,45 +138,27 @@ def test_partition_classifier_blocks_answer_keys():
     )
 
 
-def test_science_mapping_is_section_level_not_whole_book():
-    living, gran, status = outcome_ids_for(
-        grade=3,
+def test_native_ncert_alignment_has_no_cisce_yaml():
+    assert load_alignment() == ()
+    ids, gran, status = outcome_ids_for(
+        grade=6,
         subject="science",
-        unit_slug="unit_01_science_oer",
-        section_title="Living and Non-Living Things",
-        text="A rock is a non-living thing. A bird is a living thing.",
+        unit_slug="science",
+        section_title="Components of food",
+        text="Carbohydrates, proteins, fats, vitamins and minerals.",
     )
-    assert gran == "section"
-    assert status == "needs_human_review"
-    assert "cisce_g3_sci_living_nonliving" in living
-    weather, _, weather_status = outcome_ids_for(
-        grade=3,
-        subject="science",
-        unit_slug="unit_01_science_oer",
-        section_title="Weather Instruments",
-        text="A thermometer measures how hot or cold the weather is.",
-    )
-    assert weather == []
-    assert weather_status == "unmapped"
-    empty, _, unmapped = outcome_ids_for(
-        grade=3,
-        subject="science",
-        unit_slug="unit_01_science_oer",
-        section_title="Publisher address",
-        text="Printed in the United States. ISBN 978-0-000000-00-0.",
-    )
-    assert empty == []
-    assert unmapped == "unmapped"
+    assert ids == []
+    assert gran == "none"
+    assert status == "ncert_native"
 
 
 def test_verified_alignment_requires_human_reviewer():
-    from rag.alignment import validate_alignment_row
     import pytest
 
     with pytest.raises(ValueError):
         validate_alignment_row(
             {
-                "outcome_id": "cisce_g3_sci_living_nonliving",
+                "outcome_id": "example",
                 "alignment_status": "verified",
                 "reviewer": "",
                 "reviewed_at": "",
@@ -145,81 +170,18 @@ def test_catalog_does_not_use_archive_org_mirrors():
     for item in all_source_files():
         assert "archive.org" not in item.direct_download_url.lower()
         assert "archive.org" not in item.official_page_url.lower()
+        assert "cisce.org" not in item.direct_download_url.lower()
+        assert "siyavula.com" not in item.direct_download_url.lower()
+        assert "nysed" not in item.direct_download_url.lower()
 
 
-def test_alignment_file_loads_and_is_unverified():
-    rows = load_alignment()
-    assert rows
-    assert all(row.get("alignment_status") == "needs_human_review" for row in rows)
-    assert all(not row.get("reviewer") for row in rows)
-    ids = {row.get("outcome_id") for row in rows}
-    assert "cisce_g3_math_fractions" not in ids
-    assert "cisce_g3_sci_earth_weather" not in ids
-    assert "cisce_g4_sci_earth" not in ids
-    data, gran, status = outcome_ids_for(
-        grade=3,
-        subject="mathematics",
-        unit_slug="module_06_collecting",
-        section_title="Tally marks and picture graphs",
-        text="Record the data using tally marks and draw a pictograph.",
-    )
-    assert "cisce_g3_math_data" in data
-    assert gran == "section"
-    assert status == "needs_human_review"
-    none, _, unmapped = outcome_ids_for(
-        grade=3, subject="mathematics", unit_slug="module_05_fractions"
-    )
-    assert none == []
-    assert unmapped == "unmapped"
+def test_alignment_strict_filters_to_ncert_source():
+    from rag.retrieval_base import build_filter_clause
+    from rag.schemas import RetrievalFilter
 
-
-def test_alignment_matches_truncated_and_full_slugs():
-    full = "module_03_multiplication_and_division_with_units_of_0_1_6_9_and_multip"
-    ids, _, _ = outcome_ids_for(
-        grade=3,
-        subject="mathematics",
-        unit_slug=full,
-        section_title="Multiplication as equal groups",
-        text="Students use arrays and grouping for multiplication and division.",
-    )
-    assert "cisce_g3_math_number_operations" in ids
-    decimals, _, unmapped = outcome_ids_for(
-        grade=4,
-        subject="mathematics",
-        unit_slug="module_06_decimal",
-        section_title="Tenths and hundredths",
-        text="Write tenths as decimal fractions.",
-    )
-    assert decimals == []
-    assert unmapped == "unmapped"
-    fractions, gran, _ = outcome_ids_for(
-        grade=4,
-        subject="mathematics",
-        unit_slug="module_05_fraction_equivalence",
-        section_title="Equivalent fractions",
-        text="Add like fractions that share a denominator.",
-    )
-    assert "cisce_g4_math_fractions" in fractions
-    assert gran == "section"
-
-
-def test_rounding_sections_are_excluded_from_class_iv_place_value():
-    ids, _, _ = outcome_ids_for(
-        grade=4,
-        subject="mathematics",
-        unit_slug="module_01_place_value_rounding",
-        section_title="Rounding to the nearest hundred",
-        text="Round 4,562 to the nearest hundred using place value.",
-    )
-    assert "cisce_g4_math_place_value" not in ids
-    kept, _, _ = outcome_ids_for(
-        grade=4,
-        subject="mathematics",
-        unit_slug="module_01_place_value_rounding",
-        section_title="Place value of six-digit numbers",
-        text="Write a six-digit number in expanded form using place value.",
-    )
-    assert "cisce_g4_math_place_value" in kept
+    clause, params = build_filter_clause(RetrievalFilter(alignment_strict=True))
+    assert "source_id" in clause
+    assert params.get("flt_source_ncert") == SOURCE_NCERT
 
 
 def test_no_core_knowledge_in_repo_config_and_scripts():
@@ -236,3 +198,4 @@ def test_no_core_knowledge_in_repo_config_and_scripts():
             offenders.append(str(path))
     assert offenders == []
     assert not (root / "scripts" / "download_core_knowledge_stem.py").exists()
+    assert not (root / "curriculum" / "alignment" / "cisce_grade_3_5_stem.yaml").exists()

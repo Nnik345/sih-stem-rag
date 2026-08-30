@@ -5,10 +5,9 @@ Shows DENSE, FULL-TEXT, GRAPH, FUSED and RERANKED results side by side with each
 candidate's per-channel ranks, RRF score and reranker score, so retrieval
 behaviour can be understood and compared between configurations.
 
-    python scripts/test_retriever.py                         # interactive
-    python scripts/test_retriever.py -q "what is a unit fraction" -g 3 -s mathematics
-    python scripts/test_retriever.py -q "how does weather change" -g 3 -s science --no-rerank
-    python scripts/test_retriever.py -q "what is a unit fraction" -g 3 -s mathematics --json out.json
+    python scripts/test_retriever.py -q "what are the components of food" -g 6 -s science
+    python scripts/test_retriever.py -q "how does light reflect" -g 10 -s science --no-rerank
+    python scripts/test_retriever.py -q "what is electrostatics" -g 12 -s science --json out.json
 """
 
 from __future__ import annotations

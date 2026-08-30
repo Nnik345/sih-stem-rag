@@ -57,8 +57,8 @@ class RunCreateRequest(BaseModel):
     def grade_range(cls, value: int | None) -> int | None:
         if value is None:
             return value
-        if value not in (3, 4, 5):
-            raise ValueError("Grade must be 3, 4, or 5.")
+        if value not in range(1, 13):
+            raise ValueError("Grade must be an integer from 1 to 12.")
         return value
 
     @field_validator("subject")

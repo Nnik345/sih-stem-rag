@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .curriculum_catalog import PRODUCTION_PARTITIONS
+from .curriculum_catalog import PRODUCTION_PARTITIONS, SOURCE_NCERT
 from .schemas import RetrievalFilter, RetrievedChunk
 
 # Standard chunk projection, so every channel returns the same shape.
@@ -88,10 +88,8 @@ def build_filter_clause(
         )
         params["flt_ok_partitions"] = list(PRODUCTION_PARTITIONS)
     if scope.alignment_strict:
-        conditions.append(
-            f"size(coalesce({alias}.cisce_outcome_ids, [])) > 0 "
-            f"AND coalesce({alias}.alignment_status, 'unmapped') <> 'unmapped'"
-        )
+        conditions.append(f"coalesce({alias}.source_id, '') = $flt_source_ncert")
+        params["flt_source_ncert"] = SOURCE_NCERT
 
     return " AND ".join(conditions), params
 
