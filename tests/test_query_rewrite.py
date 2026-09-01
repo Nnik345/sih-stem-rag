@@ -159,6 +159,29 @@ def test_specialize_maths_retrieval_query_replaces_photo_equation():
     assert specialize_maths_retrieval_query(rewriter, original=equation) == out
 
 
+def test_ddx_solution_request_is_not_quadratic_roots():
+    query = "provide a solution for d/dx 3x^2 - 4x + 3"
+    out = specialize_maths_retrieval_query(query, original=query)
+    assert "algebra of derivative" in out
+    assert "power n" in out
+    blob = out.lower()
+    assert "root" not in blob
+    assert "zero" not in blob
+    assert "quadratic equation" not in blob
+    assert "factoris" not in blob
+
+
+def test_original_ddx_overrides_quadratic_rewriter_query():
+    query = "provide a solution for d/dx 3x^2 - 4x + 3"
+    out = specialize_maths_retrieval_query(
+        "quadratic equations and roots",
+        original=query,
+    )
+    assert out == "algebra of derivative of functions derivative of x to the power n"
+    assert "quadratic" not in out.lower()
+    assert "root" not in out.lower()
+
+
 def test_maths_instance_retrieval_query_is_specialised_before_dense():
     config = load_config(require_neo4j=False)
     order: list[object] = []

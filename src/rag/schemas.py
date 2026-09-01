@@ -513,6 +513,7 @@ class RetrievedChunk:
     alignment_status: str | None = None
     mapping_granularity: str | None = None
     selection_reason: str | None = None
+    grade_distance: int | None = None
     raw_rerank_score: float | None = None
     rerank_probability: float | None = None
 
@@ -648,6 +649,7 @@ class RetrievedChunk:
             "raw_rerank_score": self.raw_rerank_score,
             "rerank_probability": self.rerank_probability,
             "selection_reason": self.selection_reason,
+            "grade_distance": self.grade_distance,
             "mapping_granularity": self.mapping_granularity,
             "concepts": list(self.concepts),
             "images": list(self.images),

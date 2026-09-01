@@ -97,6 +97,9 @@ def test_large_gpu_keeps_tutor_loaded_for_next_retrieval():
 
 
 def test_stream_answer_releases_retrieval_models_before_generate():
+    from rag.socratic import TutorState, TutorTurn
+    from rag.schemas import RetrievalFilter
+
     config = load_config(require_neo4j=False)
     released: list[str] = []
     pipeline = SocraticRagPipeline.__new__(SocraticRagPipeline)
@@ -104,13 +107,25 @@ def test_stream_answer_releases_retrieval_models_before_generate():
     pipeline.retriever = MagicMock()
     pipeline.retriever.release_models = lambda: released.append("release")
     fake_gen = MagicMock()
-    fake_gen.stream = MagicMock(return_value=iter(["ok"]))
+    fake_gen.complete = MagicMock(
+        return_value='{"hint": "Name the process.", "guiding_question": "What happens to water when heated?"}'
+    )
+    fake_gen.stream = MagicMock(side_effect=AssertionError("must not stream"))
     pipeline._generator = fake_gen
 
     result = MagicMock()
-    result.turn.messages = [{"role": "user", "content": "hi"}]
+    result.turn = TutorTurn(
+        question="how does water change?",
+        state=TutorState.GIVE_HINT,
+        system_prompt="sys",
+        user_prompt="how does water change?",
+        scope=RetrievalFilter(grade=6, subject="science"),
+    )
     result.image_paths = []
 
-    assert list(pipeline.stream_answer(result)) == ["ok"]
+    pieces = list(pipeline.stream_answer(result))
+    assert len(pieces) == 1
+    assert "Name the process." in pieces[0]
     assert released == ["release"]
-    fake_gen.stream.assert_called_once()
+    fake_gen.complete.assert_called_once()
+    fake_gen.stream.assert_not_called()

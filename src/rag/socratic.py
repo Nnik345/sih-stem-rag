@@ -42,21 +42,28 @@ def _state_instruction(state: TutorState, subject: str | None) -> str:
     maths = _is_mathematics(subject)
     if state is TutorState.GIVE_HINT:
         if maths:
-            return (
+            pedagogy = (
                 "Give one small hint that points to the next useful rule or "
                 "working step without applying all the remaining steps. Do not "
                 "state or reveal the final answer. End with exactly one guiding "
                 "question that helps the student perform that next step."
             )
+        else:
+            pedagogy = (
+                "Give one small hint that points the student toward the relevant "
+                "concept without stating the answer or giving a full explanation. "
+                "End with exactly one guiding question that helps the student reason "
+                "out the next part."
+            )
         return (
-            "Give one small hint that points the student toward the relevant "
-            "concept without stating the answer or giving a full explanation. "
-            "End with exactly one guiding question that helps the student reason "
-            "out the next part."
+            pedagogy
+            + " Output one JSON object only, no markdown: "
+            '{"hint": "...", "guiding_question": "...?"}. '
+            "Do not list a sequence of solution steps or a complete explanation."
         )
     if state is TutorState.EXPLAIN_CONCEPT:
         if maths:
-            return (
+            pedagogy = (
                 "Explain the mathematical concept clearly. State the relevant "
                 "formula or rule when one applies. Then demonstrate it with one "
                 "fully worked example that is similar to, but not the same as, "
@@ -65,11 +72,20 @@ def _state_instruction(state: TutorState, subject: str | None) -> str:
                 "the final answer to the student's exact problem. Do not invent a "
                 "formula when the evidence gives only a non-formula rule."
             )
+        else:
+            pedagogy = (
+                "Explain the requested concept clearly and completely at the student's "
+                "grade level. Connect the main ideas in a logical order and use a short "
+                "example only when the evidence supports it. Do not turn the response "
+                "into a quiz or require the student to infer the explanation."
+            )
         return (
-            "Explain the requested concept clearly and completely at the student's "
-            "grade level. Connect the main ideas in a logical order and use a short "
-            "example only when the evidence supports it. Do not turn the response "
-            "into a quiz or require the student to infer the explanation."
+            pedagogy
+            + " Output one JSON object only, no markdown: "
+            '{"explanation": "...", "formula_or_rule": "..." or null, '
+            '"worked_example": {"problem": "...", "steps": ["..."], "answer": "..."} '
+            "or null}. For mathematics, worked_example is required and must differ "
+            "from the student's exact problem."
         )
     if state is TutorState.CONFIRM_ANSWER:
         extra = ""
@@ -105,7 +121,9 @@ def _state_instruction(state: TutorState, subject: str | None) -> str:
             "question, so you will not guess. Offer what the curriculum does cover "
             "nearby only when it is genuinely relevant, and invite the student to "
             "rephrase or ask their teacher. Do not answer any part of the question "
-            "from general knowledge while declining."
+            "from general knowledge while declining. "
+            "Output one JSON object only, no markdown: "
+            '{"decline": "...", "nearby_coverage": "..." or null, "next_step": "..."}.'
         )
     raise ValueError(f"Unknown tutor state: {state}")
 
@@ -469,7 +487,10 @@ class SocraticController:
             parts.append(
                 "Tell the student you do not have verified curriculum material "
                 "for this question. Do not answer from general knowledge. "
-                "Do not mention [E1] labels or that you inspected hidden evidence."
+                "Do not mention [E1] labels or that you inspected hidden evidence. "
+                "Output JSON only: "
+                '{"decline": "...", "nearby_coverage": "..." or null, '
+                '"next_step": "..."}.'
             )
         else:
             parts.append(f"CURRICULUM EVIDENCE\n{self.format_evidence(evidence)}")
@@ -487,6 +508,18 @@ class SocraticController:
                     "group repeated instances of the same mistake; do not reveal "
                     "the corrected final answer. "
                     "Do not write Correct. or Not quite. inside JSON fields."
+                )
+            elif state is TutorState.GIVE_HINT:
+                parts.append(
+                    "HINT JSON (private; output JSON only)\n"
+                    '{"hint": "...", "guiding_question": "...?"}'
+                )
+            elif state is TutorState.EXPLAIN_CONCEPT:
+                parts.append(
+                    "EXPLAIN JSON (private; output JSON only)\n"
+                    '{"explanation": "...", "formula_or_rule": "..." or null, '
+                    '"worked_example": {"problem": "...", "steps": ["..."], '
+                    '"answer": "..."} or null}'
                 )
             parts.append(
                 "Ground your reply in the hidden curriculum material. "

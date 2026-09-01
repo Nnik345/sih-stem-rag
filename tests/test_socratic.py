@@ -50,13 +50,14 @@ def test_give_hint_maths_vs_science_wording():
     physics = controller.system_prompt(
         TutorState.GIVE_HINT, RetrievalFilter(grade=11, subject="physics")
     )
-    assert "next working step" in maths
-    assert "finish the solution" in maths
-    assert "small hint about the concept" in science
-    assert "Do not lecture" in science
-    assert "small hint about the concept" in physics
-    assert "180 words" in maths
-    assert "Never reveal the complete solution" in science
+    assert "working step" in maths
+    assert "final answer" in maths
+    assert "relevant concept" in science
+    assert "guiding question" in science
+    assert "relevant concept" in physics
+    assert "90 words" in maths
+    assert "Ask exactly one guiding question" in science
+    assert '"hint"' in maths
 
 
 def test_explain_concept_maths_vs_science_and_drops_guided_rules():
@@ -70,13 +71,13 @@ def test_explain_concept_maths_vs_science_and_drops_guided_rules():
     biology = controller.system_prompt(
         TutorState.EXPLAIN_CONCEPT, RetrievalFilter(grade=12, subject="biology")
     )
-    assert "fully worked solution" in maths
-    assert "Fully explain the concept" in science
-    assert "Fully explain the concept" in biology
+    assert "fully worked example" in maths
+    assert "Explain the requested concept" in science
+    assert "Explain the requested concept" in biology
     for prompt in (maths, science, biology):
         assert "180 words" not in prompt
-        assert "Never reveal the complete solution" not in prompt
-        assert "Stay grounded in the evidence" in prompt
+        assert "Ask exactly one guiding question" not in prompt
+        assert "worked_example" in prompt
 
 
 def test_confirm_answer_marks_attempt_and_does_not_quiz():
@@ -147,7 +148,7 @@ def test_system_prompt_applies_retrieved_rule_and_does_not_leak_on_insufficient(
         assert "earlier class" in prompt
     assert "private check" in confirm
     assert "apply that rule" not in insufficient
-    assert "numeric or algebraic answer from general knowledge" in insufficient
+    assert "from general knowledge" in insufficient
 
 
 def test_every_state_hides_evidence_from_the_student():
@@ -156,7 +157,7 @@ def test_every_state_hides_evidence_from_the_student():
     for state in TutorState:
         system = controller.system_prompt(state, scope)
         assert "cannot see CURRICULUM EVIDENCE" in system
-        assert "according to E1" in system
+        assert "according to the evidence" in system
         user = controller.user_prompt("What is a derivative?", (), state=state)
         assert "hidden from the student" in user
         assert "according to the evidence" in user

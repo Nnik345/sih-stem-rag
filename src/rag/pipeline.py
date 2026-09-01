@@ -386,6 +386,7 @@ class HybridRetriever:
                 scored,
                 limit=limit,
                 min_score=self.config.evidence.min_rerank_score,
+                requested_grade=scope.grade,
             )
             reranker_trace = (
                 _build_reranker_trace(scored, {c.chunk_id for c in selected})
@@ -403,7 +404,7 @@ class HybridRetriever:
         else:
             diagnostics.reranked = list(fused)
             selected = select_final_evidence(
-                fused, limit=limit, min_score=None
+                fused, limit=limit, min_score=None, requested_grade=scope.grade
             )
             if not rerank:
                 diagnostics.notes.append("reranking disabled by caller")
@@ -424,6 +425,16 @@ class HybridRetriever:
         diagnostics.notes.append(
             "textbook figures are not shown in the answer; student photos are input-only"
         )
+        if scope.grade is not None and selected:
+            parts = [
+                f"{chunk.chunk_id}:class{chunk.grade}:d={chunk.grade_distance}"
+                for chunk in selected
+            ]
+            diagnostics.notes.append(
+                "grade proximity (requested class "
+                f"{scope.grade}; closer grades preferred among comparable "
+                f"relevance): {', '.join(parts)}"
+            )
 
         if observer is not None:
             annotate_later_status(dense_trace.candidates, fused_ids, evidence_ids)
@@ -677,29 +688,15 @@ class SocraticRagPipeline:
         timer = Timer()
         emit(observer, "generation_started")
         try:
-            if result.turn.state is TutorState.CONFIRM_ANSWER:
-                from .confirm_eval import evaluate_confirm
+            from .structured_tutor import generate_structured_reply
 
-                text = evaluate_confirm(
-                    self.generator,
-                    result.turn.messages,
-                    question=result.turn.question,
-                    subject=result.turn.scope.subject,
-                    image_paths=result.image_paths,
-                )
-                result.response_text = text
-                yield text
-            else:
-                pieces: list[str] = []
-                for piece in self.generator.stream(
-                    result.turn.messages,
-                    settings=settings,
-                    image_paths=result.image_paths,
-                ):
-                    pieces.append(piece)
-                    emit(observer, "generation_token", token=piece)
-                    yield piece
-                result.response_text = "".join(pieces)
+            text = generate_structured_reply(
+                self.generator,
+                result.turn,
+                image_paths=result.image_paths,
+            )
+            result.response_text = text
+            yield text
         finally:
             result.generation_ms = timer.stop() * 1000
             LOGGER.info(

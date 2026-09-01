@@ -301,3 +301,56 @@ class TestStandardChannels:
         config = RetrievalConfig()
         assert config.weight_graph < config.weight_dense
         assert config.weight_graph < config.weight_fulltext
+
+
+def _graded(chunk_id: str, grade: int, score: float) -> RetrievedChunk:
+    chunk = RetrievedChunk(chunk_id=chunk_id, text=f"text of {chunk_id}", grade=grade)
+    chunk.rerank_score = score
+    chunk.rrf_score = score
+    chunk.source_role = "primary"
+    return chunk
+
+
+class TestGradeProximity:
+    def test_closer_prior_grade_wins_when_relevance_is_comparable(self):
+        from rag.fusion import select_final_evidence
+
+        class11 = _graded("cls11", 11, 1.5)
+        class9 = _graded("cls9", 9, 1.5)
+        selected = select_final_evidence(
+            [class9, class11], limit=2, min_score=0.0, requested_grade=12
+        )
+        assert [c.chunk_id for c in selected] == ["cls11", "cls9"]
+        assert class11.grade_distance == 1
+        assert class9.grade_distance == 3
+
+    def test_requested_grade_outranks_comparable_prior_grade(self):
+        from rag.fusion import select_final_evidence
+
+        class12 = _graded("cls12", 12, 1.5)
+        class11 = _graded("cls11", 11, 1.5)
+        selected = select_final_evidence(
+            [class11, class12], limit=2, min_score=0.0, requested_grade=12
+        )
+        assert [c.chunk_id for c in selected] == ["cls12", "cls11"]
+
+    def test_irrelevant_higher_grade_does_not_beat_relevant_prior(self):
+        from rag.fusion import select_final_evidence
+
+        off_topic_12 = _graded("off12", 12, 0.1)
+        relevant_11 = _graded("on11", 11, 2.4)
+        selected = select_final_evidence(
+            [off_topic_12, relevant_11], limit=2, min_score=0.0, requested_grade=12
+        )
+        assert selected[0].chunk_id == "on11"
+
+    def test_future_grade_is_dropped(self):
+        from rag.fusion import select_final_evidence
+
+        future = _graded("cls13", 13, 9.0)
+        current = _graded("cls12", 12, 1.0)
+        selected = select_final_evidence(
+            [future, current], limit=2, min_score=0.0, requested_grade=12
+        )
+        assert [c.chunk_id for c in selected] == ["cls12"]
+        assert all(c.grade is not None and c.grade <= 12 for c in selected)

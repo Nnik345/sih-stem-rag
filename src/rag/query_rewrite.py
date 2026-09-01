@@ -117,15 +117,17 @@ def specialize_maths_retrieval_query(
     as the equation itself. Searching that instance will not hit NCERT, even
     when the power rule is on the page.
     """
-    text = (retrieval_query or "").strip()
-    if not text:
-        text = (transcribed or original or "").strip()
-    blob = f"{text} {original or ''} {transcribed or ''}"
-    # NCERT never says "power rule". If the rewriter keeps that phrase (or
-    # "quadratic polynomial"), search hits Class 10 polynomials and the
-    # reranker scores the real Limits-and-Derivatives pages below 0.
-    if _DIFF_CUE_RE.search(blob):
-        if _COMPOSITE_POWER_RE.search(blob):
+    source = f"{original or ''} {transcribed or ''}"
+    rewritten = (retrieval_query or "").strip()
+    if not rewritten:
+        rewritten = source.strip()
+    text = rewritten
+    # Original-question cues win: a d/dx photo or typed query must not be
+    # searched as quadratic roots even if the 2B rewriter said so.
+    cue_blob = source if _DIFF_CUE_RE.search(source) else f"{text} {source}"
+    if _DIFF_CUE_RE.search(source) or _DIFF_CUE_RE.search(text):
+        inspect = source if _DIFF_CUE_RE.search(source) else cue_blob
+        if _COMPOSITE_POWER_RE.search(inspect):
             return _CHAIN_RULE_QUERY
         return _POLYNOMIAL_POWER_RULE_QUERY
     stripped = strip_maths_instance_text(text)

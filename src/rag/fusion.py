@@ -163,26 +163,80 @@ def _is_adequate(chunk: RetrievedChunk, min_score: float | None) -> bool:
     return chunk.rerank_score >= min_score
 
 
+def grade_distance(chunk_grade: int | None, requested_grade: int | None) -> int | None:
+    """0 = same class, 1 = one year earlier, … None if unknown or future."""
+    if chunk_grade is None or requested_grade is None:
+        return None
+    if chunk_grade > requested_grade:
+        return None
+    return requested_grade - chunk_grade
+
+
+def apply_grade_proximity(
+    chunks: Sequence[RetrievedChunk],
+    requested_grade: int | None,
+) -> list[RetrievedChunk]:
+    """Keep relevance primary; closer grades win among comparable scores.
+
+    Chunks from a class above ``requested_grade`` are dropped. Remaining
+    candidates are annotated with ``grade_distance`` and ordered by
+    ``(-retrieval_score, grade_distance, original index)``.
+    """
+    allowed: list[RetrievedChunk] = []
+    for chunk in chunks:
+        if requested_grade is not None and chunk.grade is not None:
+            if chunk.grade > requested_grade:
+                continue
+        chunk.grade_distance = grade_distance(chunk.grade, requested_grade)
+        allowed.append(chunk)
+    if requested_grade is None:
+        return allowed
+
+    def _key(item: tuple[int, RetrievedChunk]) -> tuple[float, int, int]:
+        index, chunk = item
+        score = -float(chunk.retrieval_score)
+        distance = chunk.grade_distance if chunk.grade_distance is not None else 10**6
+        return (score, distance, index)
+
+    return [chunk for _, chunk in sorted(enumerate(allowed), key=_key)]
+
+
 def select_final_evidence(
     chunks: Sequence[RetrievedChunk],
     *,
     limit: int,
     min_score: float | None = None,
+    requested_grade: int | None = None,
 ) -> list[RetrievedChunk]:
-    """Choose final evidence without mutating fused/rerank order.
+    """Choose final evidence without mutating fused/rerank scores.
 
     Source-role preference applies only here. Adequate primary evidence is
     taken first. Adequate support is added when it fills a gap, offers an
     alternative explanation, or no adequate primary exists. An inadequate
-    primary never displaces adequate support.
+    primary never displaces adequate support. Within each bucket, closer
+    grades are preferred among comparably relevant chunks.
     """
     if not chunks or limit <= 0:
         return []
 
-    primary_ok = [c for c in chunks if c.source_role != "support" and _is_adequate(c, min_score)]
-    support_ok = [c for c in chunks if c.source_role == "support" and _is_adequate(c, min_score)]
-    primary_weak = [c for c in chunks if c.source_role != "support" and not _is_adequate(c, min_score)]
-    support_weak = [c for c in chunks if c.source_role == "support" and not _is_adequate(c, min_score)]
+    ordered = apply_grade_proximity(chunks, requested_grade)
+
+    def _in_order(pool: Sequence[RetrievedChunk]) -> list[RetrievedChunk]:
+        ids = {c.chunk_id for c in pool}
+        return [c for c in ordered if c.chunk_id in ids]
+
+    primary_ok = _in_order(
+        [c for c in ordered if c.source_role != "support" and _is_adequate(c, min_score)]
+    )
+    support_ok = _in_order(
+        [c for c in ordered if c.source_role == "support" and _is_adequate(c, min_score)]
+    )
+    primary_weak = _in_order(
+        [c for c in ordered if c.source_role != "support" and not _is_adequate(c, min_score)]
+    )
+    support_weak = _in_order(
+        [c for c in ordered if c.source_role == "support" and not _is_adequate(c, min_score)]
+    )
 
     selected: list[RetrievedChunk] = []
     for chunk in primary_ok:

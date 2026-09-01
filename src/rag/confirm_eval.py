@@ -6,23 +6,26 @@ when the question is safely parseable mathematics; other subjects are unchanged.
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from typing import Any, Sequence
 
-from .generator import GenerationSettings
 from .logging_utils import get_logger
-from .socratic import TutorState, _STATE_WORD_LIMITS
+from .socratic import TutorState
+from .tutor_json import (
+    complete_json,
+    has_leak,
+    parse_json_object,
+    reveals_final_answer,
+    settings_for,
+    within_word_limit,
+)
 
 LOGGER = get_logger(__name__)
 
-CONFIRM_MAX_NEW_TOKENS = 400
-CONFIRM_GENERATION_SETTINGS = GenerationSettings(
-    max_new_tokens=CONFIRM_MAX_NEW_TOKENS,
-    do_sample=False,
-)
-CONFIRM_WORD_LIMIT = _STATE_WORD_LIMITS[TutorState.CONFIRM_ANSWER]
+CONFIRM_GENERATION_SETTINGS = settings_for(TutorState.CONFIRM_ANSWER)
+CONFIRM_MAX_NEW_TOKENS = CONFIRM_GENERATION_SETTINGS.max_new_tokens
+CONFIRM_WORD_LIMIT = 300
 SAFE_FALLBACK = (
     "I could not verify that answer reliably. Please try again or ask your teacher."
 )
@@ -35,8 +38,6 @@ JSON_REPAIR_INSTRUCTION = (
     "and hint strings, grouped by distinct mistake, and must not reveal the "
     "corrected final answer."
 )
-
-_JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 _DERIVATIVE_CLAIM_RE = re.compile(
     r"(?is)^\s*(?:is\s+)?(?:the\s+)?"
     r"(?:derivative|differentiation)\s+of\s+(?P<expr>.+?)\s+"
@@ -49,17 +50,6 @@ _BANNED_EXPR = re.compile(
 )
 _VERDICT_PREFIX_RE = re.compile(
     r"^\s*(correct|not quite|incorrect)\b[.:!]?",
-    re.IGNORECASE,
-)
-_LEAK_RE = re.compile(
-    r"\[E\d+\]|\bE[123]\b|CURRICULUM EVIDENCE|according to the evidence",
-    re.IGNORECASE,
-)
-_REVEALS_ANSWER_RE = re.compile(
-    r"\b(?:the\s+(?:correct\s+)?(?:final\s+)?answer\s+is|"
-    r"corrected\s+(?:final\s+)?answer|"
-    r"complete(?:d)?\s+replacement\s+solution|"
-    r"the\s+correct\s+derivative\s+is)\b",
     re.IGNORECASE,
 )
 _INCORRECT_IN_REASON_RE = re.compile(
@@ -185,20 +175,7 @@ def format_confirm_response(assessment: ConfirmAssessment) -> str:
 
 
 def parse_confirm_json(raw: str) -> dict[str, Any] | None:
-    text = (raw or "").strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*", "", text)
-        text = re.sub(r"\s*```$", "", text)
-    match = _JSON_OBJECT_RE.search(text)
-    if not match:
-        return None
-    try:
-        payload = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    return payload
+    return parse_json_object(raw)
 
 
 def validate_confirm_assessment(
@@ -252,11 +229,11 @@ def validate_confirm_assessment(
     for field in fields:
         if _VERDICT_PREFIX_RE.match(field):
             return None
-        if _LEAK_RE.search(field):
+        if has_leak(field):
             return None
     if verdict == "incorrect":
         for field in fields:
-            if _REVEALS_ANSWER_RE.search(field):
+            if reveals_final_answer(field):
                 return None
             if expected_expr is not None and _contains_expected(field, expected_expr):
                 return None
@@ -266,7 +243,7 @@ def validate_confirm_assessment(
         mistake_groups=tuple(groups),
     )
     formatted = format_confirm_response(assessment)
-    if len(formatted.split()) > CONFIRM_WORD_LIMIT:
+    if not within_word_limit(formatted, TutorState.CONFIRM_ANSWER):
         return None
     if verdict == "correct" and re.search(r"\bnot quite\b", formatted, re.I):
         return None
@@ -327,13 +304,6 @@ def _with_locked_verdict(
     return copied
 
 
-def _with_repair(messages: Sequence[dict[str, str]]) -> list[dict[str, str]]:
-    copied = [{"role": m["role"], "content": m["content"]} for m in messages]
-    if copied:
-        copied[-1]["content"] = copied[-1]["content"] + "\n\n" + JSON_REPAIR_INSTRUCTION
-    return copied
-
-
 def evaluate_confirm(
     generator: Any,
     messages: Sequence[dict[str, str]],
@@ -346,22 +316,25 @@ def evaluate_confirm(
     locked, expected = _derivative_symbolic_check(question, subject=subject)
     eval_messages = _with_locked_verdict(messages, locked)
 
-    def _attempt(prompt_messages: Sequence[dict[str, str]]) -> ConfirmAssessment | None:
-        raw = generator.complete(
-            prompt_messages,
-            settings=CONFIRM_GENERATION_SETTINGS,
-            image_paths=image_paths,
-        )
-        return validate_confirm_assessment(
-            parse_confirm_json(raw if isinstance(raw, str) else ""),
+    def _validate(raw: str) -> str | None:
+        assessment = validate_confirm_assessment(
+            parse_confirm_json(raw),
             locked_verdict=locked,
             expected_expr=expected,
         )
+        if assessment is None:
+            return None
+        return format_confirm_response(assessment)
 
-    assessment = _attempt(eval_messages)
-    if assessment is None:
-        assessment = _attempt(_with_repair(eval_messages))
-    if assessment is None:
+    formatted = complete_json(
+        generator,
+        eval_messages,
+        settings=CONFIRM_GENERATION_SETTINGS,
+        image_paths=image_paths,
+        validate=_validate,
+        repair_instruction=JSON_REPAIR_INSTRUCTION,
+    )
+    if formatted is None:
         LOGGER.warning("CONFIRM_ANSWER evaluation failed after retry; using fallback")
         return SAFE_FALLBACK
-    return format_confirm_response(assessment)
+    return formatted

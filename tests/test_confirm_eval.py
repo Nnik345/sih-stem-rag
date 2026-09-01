@@ -238,22 +238,31 @@ def test_confirm_answer_does_not_stream_raw_evaluator_output():
     assert "generation_started" in observer.events
 
 
-def test_other_tutor_states_still_stream():
-    gen = MagicMock()
-    gen.stream = MagicMock(return_value=iter(["Hel", "lo"]))
-    gen.complete = MagicMock(side_effect=AssertionError("other states must stream"))
+def test_other_tutor_states_also_use_buffered_complete():
+    hint = json.dumps(
+        {
+            "hint": "Look at the process name.",
+            "guiding_question": "What happens when water is heated?",
+        }
+    )
+    gen = FakeGenerator([hint])
     pipeline = _pipeline_with_generator(gen)
     result = MagicMock()
     result.turn.state = TutorState.GIVE_HINT
     result.turn.messages = [{"role": "user", "content": "hint please"}]
+    result.turn.question = "what happens when water is heated?"
+    result.turn.scope.subject = "science"
+    result.turn.evidence = []
     result.image_paths = []
     observer = _Observer()
 
-    assert list(pipeline.stream_answer(result, observer=observer)) == ["Hel", "lo"]
-    gen.stream.assert_called_once()
-    gen.complete.assert_not_called()
-    assert observer.events.count("generation_token") == 2
-    assert [p["token"] for p in observer.payloads if "token" in p] == ["Hel", "lo"]
+    pieces = list(pipeline.stream_answer(result, observer=observer))
+    assert len(pieces) == 1
+    assert "Look at the process name." in pieces[0]
+    assert gen.stream_calls == 0
+    assert len(gen.complete_calls) == 1
+    assert gen.complete_calls[0]["settings"].do_sample is False
+    assert "generation_token" not in observer.events
 
 
 def test_answer_does_not_forward_confirm_tokens_to_callback():
