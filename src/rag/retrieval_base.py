@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .curriculum_catalog import PRODUCTION_PARTITIONS, SOURCE_NCERT
+from .curriculum_catalog import PRODUCTION_PARTITIONS, SOURCE_NCERT, lineage_subjects
 from .schemas import RetrievalFilter, RetrievedChunk
 
 # Standard chunk projection, so every channel returns the same shape.
@@ -60,11 +60,18 @@ def build_filter_clause(
     params: dict[str, Any] = {}
 
     if scope.grade is not None:
-        conditions.append(f"{alias}.grade = $flt_grade")
+        if scope.allow_prior_grades:
+            conditions.append(f"{alias}.grade <= $flt_grade")
+        else:
+            conditions.append(f"{alias}.grade = $flt_grade")
         params["flt_grade"] = int(scope.grade)
     if scope.subject is not None:
-        conditions.append(f"{alias}.subject = $flt_subject")
-        params["flt_subject"] = str(scope.subject).lower()
+        if scope.allow_prior_grades:
+            conditions.append(f"{alias}.subject IN $flt_subjects")
+            params["flt_subjects"] = list(lineage_subjects(str(scope.subject)))
+        else:
+            conditions.append(f"{alias}.subject = $flt_subject")
+            params["flt_subject"] = str(scope.subject).lower()
     if scope.unit_id is not None:
         conditions.append(f"{alias}.unit_id = $flt_unit_id")
         params["flt_unit_id"] = scope.unit_id

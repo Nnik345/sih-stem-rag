@@ -38,6 +38,29 @@ export function StageDetail({ stage, trace }: Props) {
           <pre>{JSON.stringify(stage === "query" ? { query: trace.query } : trace.filters, null, 2)}</pre>
         </section>
       );
+    case "rewrite":
+      return (
+        <section>
+          <h2>Query rewrite</h2>
+          <pre>
+            {JSON.stringify(
+              trace.rewrite ?? {
+                original_query: trace.query,
+                retrieval_query: null,
+              },
+              null,
+              2,
+            )}
+          </pre>
+        </section>
+      );
+    case "image":
+      return (
+        <section>
+          <h2>Textbook figure kNN</h2>
+          <pre>{JSON.stringify(trace.image ?? { hits: [], skipped: true }, null, 2)}</pre>
+        </section>
+      );
     case "graph":
       return (
         <section>

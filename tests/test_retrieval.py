@@ -14,13 +14,25 @@ from __future__ import annotations
 import pytest
 
 from rag.config import ConfigError, load_config
+from rag.curriculum_catalog import in_lineage_scope
 from rag.neo4j_store import Neo4jStore, Neo4jUnavailableError
 from rag.pipeline import HybridRetriever
+from rag.query_rewrite import QueryRewriteResult
 from rag.schemas import CHANNEL_DENSE, CHANNEL_FULLTEXT, RetrievalFilter
 from rag.retrieval_base import build_filter_clause
 
 # A question with obvious lexical anchors in NCERT maths (ingested first).
 QUERY = "counting numbers and shapes"
+
+
+def _assert_lineage(chunk, grade: int, subject: str) -> None:
+    assert in_lineage_scope(
+        chunk_grade=chunk.grade,
+        chunk_subject=chunk.subject,
+        current_grade=grade,
+        current_subject=subject,
+        allow_prior_grades=True,
+    )
 
 
 @pytest.fixture(scope="module")
@@ -53,16 +65,31 @@ def ingested(store):
     return counts
 
 
+class _PassthroughRewriter:
+    """Avoid loading the 2B VL rewriter on every retrieval integration test."""
+
+    def rewrite(self, query: str, *, grade=None, subject=None, **kwargs) -> QueryRewriteResult:
+        return QueryRewriteResult(
+            original_query=query,
+            retrieval_query=query,
+            intent="other",
+            fallback=True,
+            reason="test passthrough",
+        )
+
+    def unload(self) -> None:
+        return None
+
+
 @pytest.fixture(scope="module")
 def retriever(config, store, ingested):
     if not config.models.embedding_model_path.is_dir():
         pytest.skip(
             "BGE-M3 missing; run scripts/download_retrieval_models.py"
         )
-    retriever = HybridRetriever(config, store)
+    retriever = HybridRetriever(config, store, rewriter=_PassthroughRewriter())
     yield retriever
-    retriever.embedder.unload()
-    retriever.reranker.unload()
+    retriever.release_models()
 
 
 @pytest.fixture(scope="module")
@@ -115,6 +142,23 @@ class TestGraphContents:
         if {"mathematics", "science"} - subjects:
             pytest.skip("both subjects not ingested yet")
         assert {"mathematics", "science"} <= subjects
+
+    def test_class_11_12_pcb_subjects_when_ingested(self, store, ingested):
+        subjects = {
+            (row["grade"], row["subject"])
+            for row in store.read(
+                "MATCH (g:Grade)-[:HAS_SUBJECT]->(s:Subject) "
+                "RETURN g.grade AS grade, s.subject AS subject"
+            )
+        }
+        pcb = {"physics", "chemistry", "biology"}
+        senior = {subject for grade, subject in subjects if grade in (11, 12)}
+        if not senior:
+            pytest.skip("classes 11–12 not ingested yet")
+        if not (pcb & senior):
+            pytest.skip("PCB subjects not ingested yet")
+        assert pcb <= senior
+        assert "science" not in senior
 
     def test_chunks_have_text_and_embeddings(self, store, ingested):
         assert ingested["chunks"] > 0
@@ -227,8 +271,7 @@ class TestMetadataFiltering:
         if not response.results:
             pytest.skip("class 6 mathematics not ingested yet")
         for chunk in response.results:
-            assert chunk.subject == "mathematics"
-            assert chunk.grade == 6
+            _assert_lineage(chunk, 6, "mathematics")
 
     def test_unsupported_grades_return_no_results(self, retriever):
         response = retriever.retrieve("numbers", grade=13, rerank=False)
@@ -336,8 +379,7 @@ class TestFullPipeline:
 
     def test_final_chunks_respect_the_requested_scope(self, response):
         for chunk in response.results:
-            assert chunk.grade == 6
-            assert chunk.subject == "science"
+            _assert_lineage(chunk, 6, "science")
 
     def test_ncert_maths_retrieves_primary_textbook(self, retriever):
         response = retriever.retrieve(
@@ -383,22 +425,20 @@ class TestFullPipeline:
             pytest.skip("class 10 science not ingested yet")
         for chunk in response.results:
             assert chunk.source_id == "ncert_textbook"
-            assert chunk.grade == 10
-            assert chunk.subject == "science"
+            _assert_lineage(chunk, 10, "science")
 
     def test_class12_electrostatics_retrieves_ncert_physics(self, retriever):
         response = retriever.retrieve(
             "what is electrostatics and electric charge",
             grade=12,
-            subject="science",
+            subject="physics",
             rerank=False,
         )
         if not response.results:
-            pytest.skip("class 12 science not ingested yet")
+            pytest.skip("class 12 physics not ingested yet")
         for chunk in response.results:
             assert chunk.source_id == "ncert_textbook"
-            assert chunk.grade == 12
-            assert chunk.subject == "science"
+            _assert_lineage(chunk, 12, "physics")
 
     def test_production_never_returns_evaluation_only(self, retriever):
         response = retriever.retrieve(
@@ -464,3 +504,40 @@ class TestFullPipeline:
         )
         top = response.results[0].rerank_score if response.results else None
         assert top is None or top < 0.9
+
+
+class TestLiveQueryRewrite:
+    """Uses the real 2B rewriter. Skips when the checkpoint is not on disk."""
+
+    def test_class12_maths_colloquial_rewrite_retrieves_derivatives(
+        self, config, store, ingested
+    ):
+        if not config.models.rewriter_model_path.is_dir():
+            pytest.skip("Qwen3-VL-2B rewriter missing; run scripts/download_qwen_models.py")
+        retriever = HybridRetriever(config, store)
+        try:
+            response = retriever.retrieve(
+                "what is differentiation of x squared",
+                grade=12,
+                subject="mathematics",
+                rerank=True,
+            )
+        finally:
+            retriever.release_models()
+        assert response.diagnostics.retrieval_query
+        if response.diagnostics.rewrite_fallback:
+            pytest.skip(
+                f"rewriter fell back: {response.diagnostics.notes}"
+            )
+        rewritten = response.diagnostics.retrieval_query.lower()
+        assert rewritten != "what is differentiation of x squared" or "derivative" in rewritten
+        if not response.results:
+            pytest.skip("class 12 mathematics not ingested yet")
+        for chunk in response.results:
+            _assert_lineage(chunk, 12, "mathematics")
+        blob = " ".join(c.text.lower() for c in response.results)
+        assert any(
+            token in blob
+            for token in ("derivative", "differenti", "limit", "function")
+        )
+

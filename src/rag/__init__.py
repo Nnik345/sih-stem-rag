@@ -10,6 +10,8 @@ benchmarked on its own -- no LangChain / LlamaIndex abstraction in between):
     chunker           hierarchical, token-aware chunking
     concepts          conservative concept extraction and normalisation
     embeddings        BGE-M3 dense embeddings (lazy load, releasable)
+    image_embeddings  SigLIP encoder for textbook figures
+    image_retriever   image vector kNN + page-chunk fusion
     reranker          BGE-reranker-v2-m3 cross-encoder scoring
     neo4j_store       official Neo4j driver wrapper
     graph_schema      constraints, vector index and full-text index DDL
@@ -20,6 +22,7 @@ benchmarked on its own -- no LangChain / LlamaIndex abstraction in between):
     fusion            reciprocal rank fusion
     evidence          evidence sufficiency gate
     generator         Qwen3-VL-8B-Instruct wrapper with streaming
+    query_rewrite     Qwen3-VL-2B-Instruct retrieval query rewriter
     socratic          Socratic prompt/state controller
     pipeline          end-to-end orchestration with full diagnostics
 
@@ -43,6 +46,7 @@ __all__ = [
     "graph_retriever",
     "fusion",
     "evidence",
+    "query_rewrite",
     "generator",
     "socratic",
     "pipeline",

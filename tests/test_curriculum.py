@@ -12,9 +12,13 @@ from rag.curriculum_catalog import (
     SUPPORTED_SUBJECTS,
     all_source_files,
     ingestible_files,
+    in_lineage_scope,
     is_answers_member,
     is_chapter_pdf,
+    lineage_subjects,
     ncert_zip_url,
+    subjects_for_grade,
+    validate_scope,
 )
 from rag.partitions import (
     EVALUATION_ONLY,
@@ -30,7 +34,13 @@ from rag.partitions import (
 
 def test_supported_grades_are_one_to_twelve():
     assert SUPPORTED_GRADES == tuple(range(1, 13))
-    assert SUPPORTED_SUBJECTS == ("mathematics", "science")
+    assert SUPPORTED_SUBJECTS == (
+        "mathematics",
+        "science",
+        "physics",
+        "chemistry",
+        "biology",
+    )
     for record in ingestible_files():
         assert record.grade in SUPPORTED_GRADES
         assert record.subject in SUPPORTED_SUBJECTS
@@ -55,6 +65,8 @@ def test_catalog_is_ncert_only_english_stem():
         assert item.direct_download_url.startswith("https://ncert.nic.in/")
         assert item.ncert_code
         assert "/ncert/" in item.local_path
+        if item.subject in {"physics", "chemistry", "biology"}:
+            assert "/science/" in item.local_path
         assert "copyright" in item.licence.lower()
         assert "CC BY" not in item.licence
 
@@ -65,23 +77,89 @@ def test_classes_1_2_are_maths_only():
         by_grade.setdefault(item.grade, set()).add(item.subject)
     assert by_grade[1] == {"mathematics"}
     assert by_grade[2] == {"mathematics"}
-    for grade in range(3, 13):
+    for grade in range(3, 11):
         assert "mathematics" in by_grade[grade]
         assert "science" in by_grade[grade]
+    for grade in (11, 12):
+        assert by_grade[grade] == {"mathematics", "physics", "chemistry", "biology"}
 
 
-def test_senior_secondary_science_uses_pcb_unit_slugs():
+def test_subjects_for_grade_gates_pcb():
+    assert subjects_for_grade(1) == ("mathematics",)
+    assert subjects_for_grade(6) == ("mathematics", "science")
+    assert subjects_for_grade(12) == ("mathematics", "physics", "chemistry", "biology")
+    validate_scope(12, "physics")
+    import pytest
+
+    with pytest.raises(ValueError, match="not offered"):
+        validate_scope(6, "physics")
+    with pytest.raises(ValueError, match="required"):
+        validate_scope(None, "science")
+
+
+def test_lineage_subjects_and_prior_grade_scope():
+    assert lineage_subjects("mathematics") == ("mathematics",)
+    assert lineage_subjects("science") == ("science",)
+    assert lineage_subjects("physics") == ("physics", "science")
+    assert lineage_subjects("chemistry") == ("chemistry", "science")
+    assert lineage_subjects("biology") == ("biology", "science")
+    assert in_lineage_scope(
+        chunk_grade=11,
+        chunk_subject="mathematics",
+        current_grade=12,
+        current_subject="mathematics",
+        allow_prior_grades=True,
+    )
+    assert in_lineage_scope(
+        chunk_grade=10,
+        chunk_subject="science",
+        current_grade=12,
+        current_subject="physics",
+        allow_prior_grades=True,
+    )
+    assert not in_lineage_scope(
+        chunk_grade=11,
+        chunk_subject="chemistry",
+        current_grade=12,
+        current_subject="physics",
+        allow_prior_grades=True,
+    )
+    assert not in_lineage_scope(
+        chunk_grade=10,
+        chunk_subject="mathematics",
+        current_grade=12,
+        current_subject="physics",
+        allow_prior_grades=True,
+    )
+    assert not in_lineage_scope(
+        chunk_grade=12,
+        chunk_subject="mathematics",
+        current_grade=11,
+        current_subject="mathematics",
+        allow_prior_grades=True,
+    )
+    assert not in_lineage_scope(
+        chunk_grade=11,
+        chunk_subject="mathematics",
+        current_grade=12,
+        current_subject="mathematics",
+        allow_prior_grades=False,
+    )
+
+
+def test_senior_secondary_science_uses_pcb_subjects():
     slugs = {
-        (item.grade, item.unit_slug)
+        (item.grade, item.subject, item.unit_slug)
         for item in ingestible_files()
-        if item.grade in (11, 12) and item.subject == "science"
+        if item.grade in (11, 12)
     }
-    assert (11, "physics_part_1") in slugs
-    assert (11, "chemistry_part_2") in slugs
-    assert (11, "biology") in slugs
-    assert (12, "physics_part_2") in slugs
-    assert (12, "chemistry_part_1") in slugs
-    assert (12, "biology") in slugs
+    assert (11, "physics", "physics_part_1") in slugs
+    assert (11, "chemistry", "chemistry_part_2") in slugs
+    assert (11, "biology", "biology") in slugs
+    assert (12, "physics", "physics_part_2") in slugs
+    assert (12, "chemistry", "chemistry_part_1") in slugs
+    assert (12, "biology", "biology") in slugs
+    assert all(item.subject != "science" or item.grade < 11 for item in ingestible_files())
 
 
 def test_class_6_science_is_curiosity_ncf():

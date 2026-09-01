@@ -30,6 +30,7 @@ import re
 from typing import Sequence
 
 from .config import EvidenceConfig
+from .curriculum_catalog import in_lineage_scope
 from .logging_utils import get_logger
 from .partitions import is_boilerplate_text, is_production_partition
 from .schemas import EvidenceCheck, EvidenceDecision, RetrievalFilter, RetrievedChunk
@@ -51,6 +52,10 @@ _STOPWORDS = frozenset(
         "would", "you", "your",
     }
 )
+_ALGEBRA_OPERATOR_WORDS = frozenset(
+    {"plus", "minus", "times", "equals", "equal", "squared", "cubed"}
+)
+_INSTANCE_TOKEN_RE = re.compile(r"^(?:\d+[a-z]+|[a-z]+\d+|\d+)$", re.IGNORECASE)
 
 
 def content_terms(text: str) -> set[str]:
@@ -60,6 +65,20 @@ def content_terms(text: str) -> set[str]:
         for token in _TOKEN_RE.findall(text.lower())
         if len(token) > 2 and token not in _STOPWORDS
     }
+
+
+def concept_terms(text: str, *, mathematics: bool = False) -> set[str]:
+    """Content words, optionally dropping algebraic instance tokens for maths."""
+    terms = content_terms(text)
+    if not mathematics:
+        return terms
+    cleaned = {
+        token
+        for token in terms
+        if token not in _ALGEBRA_OPERATOR_WORDS
+        and _INSTANCE_TOKEN_RE.match(token) is None
+    }
+    return cleaned or terms
 
 
 class EvidenceGate:
@@ -185,12 +204,20 @@ class EvidenceGate:
 
         kept = strong if strong else []
 
-        # 4. evidence sits inside the requested curriculum scope
+        # 4. evidence sits inside the requested curriculum scope (or lineage)
         if self.config.require_scope_match and (
             scope.grade is not None or scope.subject is not None
         ):
-            in_scope = [c for c in kept if self._matches_scope(c, scope)]
-            scope_ok = len(in_scope) > 0 and len(in_scope) == len(kept)
+            in_scope: list[RetrievedChunk] = []
+            for chunk in kept:
+                if not self._matches_scope(chunk, scope):
+                    continue
+                if self._is_prior_grade(chunk, scope):
+                    score = chunk.rerank_score if chunk.rerank_score is not None else float("-inf")
+                    if score < self.config.min_prior_grade_rerank_score:
+                        continue
+                in_scope.append(chunk)
+            scope_ok = len(in_scope) > 0
             checks.append(
                 EvidenceCheck(
                     name="scope_match",
@@ -204,7 +231,8 @@ class EvidenceGate:
             )
             if not scope_ok:
                 reasons.append(
-                    "Some relevant passages fall outside the requested grade/subject."
+                    "No relevant passages sit in this class or a high-scoring "
+                    "earlier class of the same subject."
                 )
             kept = in_scope
         else:
@@ -217,9 +245,12 @@ class EvidenceGate:
             )
 
         # 5. the evidence text shares content words with the question
-        query_terms = content_terms(query)
+        maths = (scope.subject or "").strip().lower() == "mathematics"
+        query_terms = concept_terms(query, mathematics=maths)
         if query_terms and kept:
-            evidence_terms = content_terms(" ".join(c.text for c in kept))
+            evidence_terms = concept_terms(
+                " ".join(c.text for c in kept), mathematics=maths
+            )
             overlap = len(query_terms & evidence_terms) / len(query_terms)
         else:
             overlap = 0.0
@@ -277,13 +308,19 @@ class EvidenceGate:
 
     @staticmethod
     def _matches_scope(chunk: RetrievedChunk, scope: RetrievalFilter) -> bool:
-        if scope.grade is not None and chunk.grade != scope.grade:
+        return in_lineage_scope(
+            chunk_grade=chunk.grade,
+            chunk_subject=chunk.subject,
+            current_grade=scope.grade,
+            current_subject=scope.subject,
+            allow_prior_grades=scope.allow_prior_grades,
+        )
+
+    @staticmethod
+    def _is_prior_grade(chunk: RetrievedChunk, scope: RetrievalFilter) -> bool:
+        if scope.grade is None or chunk.grade is None:
             return False
-        if scope.subject is not None and (chunk.subject or "").lower() != str(
-            scope.subject
-        ).lower():
-            return False
-        return True
+        return int(chunk.grade) < int(scope.grade)
 
     @staticmethod
     def _confidence(sufficient: bool, top_score: float, strong_count: int) -> str:

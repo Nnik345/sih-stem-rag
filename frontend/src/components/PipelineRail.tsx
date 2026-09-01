@@ -3,6 +3,8 @@ import { STAGE_ORDER, type StageName, type StageTrace } from "../types";
 const LABELS: Record<StageName, string> = {
   query: "Query",
   filters: "Filters",
+  rewrite: "Rewrite",
+  image: "Figures",
   dense: "Dense",
   lexical: "Lexical",
   graph: "Graph",

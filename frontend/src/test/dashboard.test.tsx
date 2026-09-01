@@ -67,6 +67,9 @@ function baseTrace(overrides: Partial<RunTrace> = {}): RunTrace {
     evidence: null,
     prompt: null,
     generation: null,
+    rewrite: null,
+    image: null,
+    attached_figures: [],
     ...overrides,
   };
 }
@@ -92,10 +95,10 @@ function node(partial: Partial<GraphNode> & Pick<GraphNode, "node_id">): GraphNo
 describe("query validation", () => {
   it("rejects a grade outside 1-12", () => {
     expect(validateQueryForm({ ...EMPTY_FORM, query: "food", grade: "13" }).grade).toMatch(/1 through 12/i);
-    expect(validateQueryForm({ ...EMPTY_FORM, query: "food", grade: "6" }).grade).toBeUndefined();
+    expect(validateQueryForm({ ...EMPTY_FORM, query: "food", grade: "6", subject: "science" }).grade).toBeUndefined();
   });
 
-  it("shows a validation error in the form", async () => {
+    it("requires grade and subject and hides extra metadata fields", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
     render(
@@ -109,7 +112,48 @@ describe("query validation", () => {
     );
     await user.click(screen.getByRole("button", { name: /run pipeline/i }));
     expect(screen.getByText(/enter a student question/i)).toBeInTheDocument();
+    expect(screen.getByText(/grade is required/i)).toBeInTheDocument();
+    expect(screen.getByText(/subject is required/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/unit id/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/resource type/i)).toBeNull();
+    expect(screen.queryByLabelText(/audience/i)).toBeNull();
+    expect(screen.queryByLabelText(/document id/i)).toBeNull();
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("gates subjects by grade", () => {
+    expect(validateQueryForm({ ...EMPTY_FORM, query: "q", grade: "6", subject: "physics" }).subject).toMatch(
+      /not offered/i,
+    );
+    expect(validateQueryForm({ ...EMPTY_FORM, query: "q", grade: "12", subject: "physics" }).subject).toBeUndefined();
+  });
+
+  it("allows an empty question when an image is attached", () => {
+    const file = new File(["x"], "cell.png", { type: "image/png" });
+    expect(
+      validateQueryForm({ ...EMPTY_FORM, grade: "6", subject: "science", imageFile: file }).query,
+    ).toBeUndefined();
+  });
+
+  it("offers hint, explain, and confirm-answer states", () => {
+    render(
+      <QueryPanel
+        form={EMPTY_FORM}
+        errors={{}}
+        running={false}
+        onChange={() => undefined}
+        onSubmit={() => undefined}
+      />,
+    );
+    const select = screen.getByLabelText(/tutor state/i);
+    const labels = Array.from(select.querySelectorAll("option")).map((option) => option.textContent);
+    expect(labels).toEqual([
+      "GIVE_HINT (default)",
+      "GIVE_HINT",
+      "EXPLAIN_CONCEPT",
+      "CONFIRM_ANSWER",
+    ]);
+    expect(labels.join(" ")).not.toMatch(/ASK_QUESTION|CORRECT_MISCONCEPTION|CONFIRM_STEP/);
   });
 });
 
@@ -340,7 +384,7 @@ describe("fusion, reranker, evidence, generator", () => {
   it("streams generator output and shows skipped generation", () => {
     const live = baseTrace({
       prompt: {
-        tutor_state: "ASK_QUESTION",
+        tutor_state: "GIVE_HINT",
         system_prompt: "Be a tutor",
         user_prompt: "STUDENT QUESTION",
         evidence_blocks: [],
@@ -369,5 +413,19 @@ describe("fusion, reranker, evidence, generator", () => {
     });
     rerender(<LiveResponse trace={skipped} running={false} />);
     expect(screen.getByTestId("generation-skipped")).toHaveTextContent(/retrieval-only/i);
+  });
+
+  it("does not render textbook figures in the generator output", () => {
+    render(
+      <LiveResponse
+        trace={baseTrace({
+          attached_figures: [{ image_id: "p1:img01", page_number: 7 }],
+          generation: { tokens: ["ok"], response_text: "ok", elapsed_ms: 1 },
+        })}
+        running={false}
+      />,
+    );
+    expect(screen.queryByText(/figures in this answer/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
 });

@@ -16,7 +16,7 @@ OneDrive_*.zip
 
 # --- Model weights (reproducible) --------------------------------------------
 # Restore: python scripts/download_retrieval_models.py
-#          huggingface-cli download Qwen/Qwen3-VL-8B-Instruct --local-dir models/qwen3-vl-8b-instruct
+#          python scripts/download_qwen_models.py
 models/
 
 # --- Secrets (not reproducible; copy from template) --------------------------

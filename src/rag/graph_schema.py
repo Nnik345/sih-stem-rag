@@ -63,6 +63,7 @@ RELATIONSHIP_TYPES = (
 )
 
 CHUNK_VECTOR_INDEX = "chunk_embedding_index"
+IMAGE_VECTOR_INDEX = "image_embedding_index"
 CHUNK_FULLTEXT_INDEX = "chunk_fulltext_index"
 CONCEPT_FULLTEXT_INDEX = "concept_fulltext_index"
 
@@ -93,6 +94,8 @@ _PROPERTY_INDEXES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("document_hash", "Document", ("content_hash",)),
     ("page_document", "Page", ("document_id",)),
     ("image_document", "Image", ("document_id",)),
+    ("image_grade_subject", "Image", ("grade", "subject")),
+    ("image_embedding_version", "Image", ("embedding_version",)),
     ("concept_normalized", "Concept", ("normalized_name",)),
 )
 
@@ -108,6 +111,8 @@ class SchemaReport:
     vector_index: str
     vector_dimension: int
     fulltext_indexes: list[str]
+    image_vector_index: str = ""
+    image_vector_dimension: int | None = None
 
     def describe(self) -> str:
         lines = [
@@ -117,6 +122,11 @@ class SchemaReport:
             f"(dim={self.vector_dimension}, cosine)",
             f"full-text indexes  : {', '.join(self.fulltext_indexes)}",
         ]
+        if self.image_vector_index:
+            lines.append(
+                f"image vector index : {self.image_vector_index} "
+                f"(dim={self.image_vector_dimension}, cosine)"
+            )
         return "\n".join(lines)
 
 
@@ -154,7 +164,7 @@ def create_vector_index(store: Neo4jStore, dimension: int) -> str:
     if dimension <= 0:
         raise ValueError(f"Vector dimension must be positive, got {dimension}")
 
-    existing = _vector_index_dimension(store)
+    existing = _vector_index_dimension(store, CHUNK_VECTOR_INDEX)
     if existing is not None and existing != dimension:
         raise RuntimeError(
             f"Vector index {CHUNK_VECTOR_INDEX} already exists with dimension "
@@ -178,11 +188,43 @@ def create_vector_index(store: Neo4jStore, dimension: int) -> str:
     return CHUNK_VECTOR_INDEX
 
 
-def _vector_index_dimension(store: Neo4jStore) -> int | None:
+def create_image_vector_index(store: Neo4jStore, dimension: int) -> str:
+    """Create the Image embedding vector index (cosine similarity).
+
+    ``dimension`` must come from the vision encoder's own config.
+    """
+    if dimension <= 0:
+        raise ValueError(f"Image vector dimension must be positive, got {dimension}")
+
+    existing = _vector_index_dimension(store, IMAGE_VECTOR_INDEX)
+    if existing is not None and existing != dimension:
+        raise RuntimeError(
+            f"Vector index {IMAGE_VECTOR_INDEX} already exists with dimension "
+            f"{existing}, but the image encoder produces {dimension}. Drop the "
+            f"index explicitly before re-indexing:\n"
+            f"  DROP INDEX {IMAGE_VECTOR_INDEX}"
+        )
+
+    store.run_ddl(
+        f"CREATE VECTOR INDEX {IMAGE_VECTOR_INDEX} IF NOT EXISTS "
+        f"FOR (i:Image) ON (i.embedding) "
+        f"OPTIONS {{ indexConfig: {{ "
+        f"`vector.dimensions`: {int(dimension)}, "
+        f"`vector.similarity_function`: 'cosine' }} }}"
+    )
+    LOGGER.info(
+        "Ensured image vector index %s (dimension=%d, cosine)",
+        IMAGE_VECTOR_INDEX,
+        dimension,
+    )
+    return IMAGE_VECTOR_INDEX
+
+
+def _vector_index_dimension(store: Neo4jStore, name: str = CHUNK_VECTOR_INDEX) -> int | None:
     records = store.read(
         "SHOW INDEXES YIELD name, type, options "
         "WHERE name = $name AND type = 'VECTOR' RETURN options",
-        {"name": CHUNK_VECTOR_INDEX},
+        {"name": name},
     )
     if not records:
         return None
@@ -239,14 +281,24 @@ def wait_for_indexes(store: Neo4jStore, timeout_seconds: int = 300) -> bool:
     return True
 
 
-def initialize_schema(store: Neo4jStore, embedding_dimension: int) -> SchemaReport:
+def initialize_schema(
+    store: Neo4jStore,
+    embedding_dimension: int,
+    *,
+    image_embedding_dimension: int | None = None,
+) -> SchemaReport:
     """Create every constraint and index the pipeline needs. Idempotent."""
+    image_index = ""
+    if image_embedding_dimension is not None:
+        image_index = create_image_vector_index(store, image_embedding_dimension)
     report = SchemaReport(
         constraints_created=create_constraints(store),
         property_indexes_created=create_property_indexes(store),
         vector_index=create_vector_index(store, embedding_dimension),
         vector_dimension=embedding_dimension,
         fulltext_indexes=create_fulltext_indexes(store),
+        image_vector_index=image_index,
+        image_vector_dimension=image_embedding_dimension,
     )
     wait_for_indexes(store)
     return report
@@ -272,6 +324,7 @@ def reset_graph(store: Neo4jStore, *, drop_indexes: bool = False) -> dict[str, i
     if drop_indexes:
         for name in (
             CHUNK_VECTOR_INDEX,
+            IMAGE_VECTOR_INDEX,
             CHUNK_FULLTEXT_INDEX,
             CONCEPT_FULLTEXT_INDEX,
         ):

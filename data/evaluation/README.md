@@ -19,8 +19,8 @@ produce meaningless numbers.
 | --- | --- | --- | --- |
 | `question_id` | string | yes | Stable identifier, unique within the file. |
 | `question` | string | yes | The student question, written as a student would ask it. |
-| `grade` | integer or null | yes | Curriculum grade to filter on (`3`, `4`, `5`), or `null` to search corpus-wide. |
-| `subject` | string or null | yes | `"mathematics"`, `"science"`, or `null`. |
+| `grade` | integer | yes | Curriculum class to filter on (`1`–`12`). Required. |
+| `subject` | string | yes | `"mathematics"`, `"science"`, `"physics"`, `"chemistry"`, or `"biology"`, matching what that class offers. |
 | `expected_unit` | string or null | no | `unit_id` (or a distinctive substring of the unit title) where the answer should live. Enables unit-level scoring without chunk labels. |
 | `relevant_chunk_ids` | array of strings | no | Chunk IDs judged relevant, from `scripts/test_retriever.py` output. Required for Recall@K / MRR / nDCG. |
 | `relevance_grades` | object | no | Optional graded judgements, `{"<chunk_id>": 2}`. Missing chunks in `relevant_chunk_ids` default to grade 1. Only used by nDCG. |

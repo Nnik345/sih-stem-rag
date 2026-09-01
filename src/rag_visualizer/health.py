@@ -52,5 +52,15 @@ def check_health() -> dict[str, Any]:
         )
         if models
         else False,
+        "rewriter_model_path_present": bool(
+            models and models.rewriter_model_path.is_dir()
+        )
+        if models
+        else False,
+        "image_embedding_model_path_present": bool(
+            models and models.image_embedding_model_path.is_dir()
+        )
+        if models
+        else False,
         "frontend_build_present": (frontend_dist_dir() / "index.html").is_file(),
     }

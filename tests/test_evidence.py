@@ -109,3 +109,156 @@ def test_similar_boilerplate_chunk_is_rejected_not_kept():
     )
     assert decision.sufficient
     assert [c.chunk_id for c in decision.kept_chunks] == ["ok"]
+
+
+def test_maths_overlap_ignores_algebraic_instance_tokens():
+    from rag.evidence import concept_terms
+
+    query = "derivative of the polynomial x squared plus 3x"
+    terms = concept_terms(query, mathematics=True)
+    assert "derivative" in terms
+    assert "polynomial" in terms
+    assert "plus" not in terms
+    assert "squared" not in terms
+    assert "3x" not in terms
+    gate = EvidenceGate(EvidenceConfig(min_rerank_score=0.0, min_query_term_overlap=0.15))
+    chunk = _chunk(
+        "power",
+        "The derivative of a polynomial is found using the power rule and the sum rule. "
+        "The derivative of x to the power n is n times x to the power n minus one.",
+        grade=11,
+        subject="mathematics",
+        rerank_score=1.2,
+    )
+    decision = gate.evaluate(
+        query,
+        [chunk],
+        scope=RetrievalFilter(grade=11, subject="mathematics"),
+    )
+    assert decision.sufficient
+
+
+def test_science_overlap_still_rejects_unrelated_topic():
+    gate = EvidenceGate(EvidenceConfig(min_rerank_score=0.0, min_query_term_overlap=0.15))
+    chunk = _chunk(
+        "wx",
+        "Weather can change from day to day. Clouds and rain are part of weather.",
+        rerank_score=0.4,
+    )
+    decision = gate.evaluate(
+        "how do black holes evaporate via hawking radiation",
+        [chunk],
+        scope=RetrievalFilter(grade=3, subject="science"),
+    )
+    assert not decision.sufficient
+
+
+def test_high_scoring_prior_grade_maths_chunk_is_kept():
+    gate = EvidenceGate(
+        EvidenceConfig(
+            min_rerank_score=0.0,
+            min_query_term_overlap=0.0,
+            min_prior_grade_rerank_score=1.0,
+        )
+    )
+    prior = _chunk(
+        "c11",
+        "The derivative of x to the power n is n times x to the power n minus one.",
+        grade=11,
+        subject="mathematics",
+        rerank_score=2.4,
+    )
+    current = _chunk(
+        "c12",
+        "The chain rule is used to differentiate a composite function.",
+        grade=12,
+        subject="mathematics",
+        rerank_score=0.2,
+    )
+    decision = gate.evaluate(
+        "derivative power rule sum rule",
+        [prior, current],
+        scope=RetrievalFilter(grade=12, subject="mathematics", allow_prior_grades=True),
+    )
+    assert decision.sufficient
+    assert {c.chunk_id for c in decision.kept_chunks} == {"c11", "c12"}
+
+
+def test_weak_prior_grade_chunk_is_dropped():
+    gate = EvidenceGate(
+        EvidenceConfig(
+            min_rerank_score=0.0,
+            min_query_term_overlap=0.0,
+            min_prior_grade_rerank_score=1.0,
+        )
+    )
+    weak = _chunk(
+        "c9",
+        "Polynomials can be added by combining like terms.",
+        grade=9,
+        subject="mathematics",
+        rerank_score=0.3,
+    )
+    current = _chunk(
+        "c12",
+        "The chain rule is used to differentiate a composite function.",
+        grade=12,
+        subject="mathematics",
+        rerank_score=0.4,
+    )
+    decision = gate.evaluate(
+        "chain rule composite function",
+        [weak, current],
+        scope=RetrievalFilter(grade=12, subject="mathematics", allow_prior_grades=True),
+    )
+    assert decision.sufficient
+    assert [c.chunk_id for c in decision.kept_chunks] == ["c12"]
+
+
+def test_physics_may_keep_high_scoring_science_not_maths_or_chemistry():
+    gate = EvidenceGate(
+        EvidenceConfig(
+            min_rerank_score=0.0,
+            min_query_term_overlap=0.0,
+            min_prior_grade_rerank_score=1.0,
+        )
+    )
+    science = _chunk(
+        "sci",
+        "Force is a push or a pull. Motion changes when an unbalanced force acts.",
+        grade=10,
+        subject="science",
+        rerank_score=2.1,
+    )
+    maths = _chunk(
+        "math",
+        "Force is a push or a pull. Motion changes when an unbalanced force acts.",
+        grade=10,
+        subject="mathematics",
+        rerank_score=3.0,
+    )
+    chemistry = _chunk(
+        "chem",
+        "Force is a push or a pull. Motion changes when an unbalanced force acts.",
+        grade=11,
+        subject="chemistry",
+        rerank_score=3.0,
+    )
+    physics = _chunk(
+        "phy",
+        "Newton's laws of motion describe how a force changes the motion of a body.",
+        grade=12,
+        subject="physics",
+        rerank_score=0.5,
+    )
+    decision = gate.evaluate(
+        "force and motion newton",
+        [science, maths, chemistry, physics],
+        scope=RetrievalFilter(grade=12, subject="physics", allow_prior_grades=True),
+    )
+    assert decision.sufficient
+    kept = {c.chunk_id for c in decision.kept_chunks}
+    assert "sci" in kept
+    assert "phy" in kept
+    assert "math" not in kept
+    assert "chem" not in kept

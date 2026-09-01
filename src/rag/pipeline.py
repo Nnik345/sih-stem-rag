@@ -21,18 +21,30 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Iterator, Sequence
 
 from .config import RagConfig
+from .curriculum_catalog import validate_scope
 from .dense_retriever import DenseRetriever, STRATEGY_EXACT, STRATEGY_INDEXED
 from .embeddings import BGEM3Embedder
 from .evidence import EvidenceGate
 from .fusion import fuse_standard_channels, select_final_evidence
 from .generator import GenerationSettings, QwenGenerator
 from .graph_retriever import GraphRetriever
+from .image_embeddings import SiglipImageEmbedder
+from .image_paths import resolve_curriculum_image, select_vision_image_paths
+from .image_retriever import ImageHit, ImageRetriever
+from .image_serve import browser_png_cache_dir, ensure_browser_png
 from .lexical_retriever import LexicalRetriever
 from .logging_utils import Timer, get_logger
+from .model_memory import (
+    cuda_memory_gib,
+    empty_cuda_cache,
+    generator_should_yield_gpu,
+)
 from .neo4j_store import Neo4jStore
+from .query_rewrite import QueryRewriter, QueryRewriteResult
 from .reranker import BGEReranker
 from .schemas import (
     CHANNEL_DENSE,
@@ -76,11 +88,14 @@ class HybridRetriever:
         *,
         embedder: BGEM3Embedder | None = None,
         reranker: BGEReranker | None = None,
+        rewriter: QueryRewriter | None = None,
     ) -> None:
         self.config = config
         self.store = store
         self.embedder = embedder or BGEM3Embedder.from_config(config.models)
         self.reranker = reranker or BGEReranker.from_config(config.models)
+        self.rewriter = rewriter or QueryRewriter.from_config(config.models)
+        self._image_embedder: SiglipImageEmbedder | None = None
 
         self.dense = DenseRetriever(
             store,
@@ -90,6 +105,12 @@ class HybridRetriever:
         )
         self.lexical = LexicalRetriever(store, config.retrieval)
         self.graph = GraphRetriever(store, config.retrieval)
+
+    @property
+    def image_embedder(self) -> SiglipImageEmbedder:
+        if self._image_embedder is None:
+            self._image_embedder = SiglipImageEmbedder.from_config(self.config.models)
+        return self._image_embedder
 
     # -- public API -------------------------------------------------------- #
 
@@ -108,6 +129,7 @@ class HybridRetriever:
         final_top_k: int | None = None,
         include_images: bool | None = None,
         observer: TraceObserver | None = None,
+        image_path: str | Path | None = None,
     ) -> RetrievalResponse:
         """Retrieve curriculum evidence for ``query``.
 
@@ -120,14 +142,16 @@ class HybridRetriever:
         ``observer`` is optional. When omitted, behaviour is unchanged and the
         graph retriever does not run diagnostic queries.
         """
+        scoped_subject = subject.lower() if isinstance(subject, str) else subject
         scope = RetrievalFilter(
             grade=grade,
-            subject=subject.lower() if isinstance(subject, str) else subject,
+            subject=scoped_subject,
             unit_id=unit,
             unit_title_contains=unit_title_contains,
             resource_type=resource_type,
             audience=audience,
             document_id=document_id,
+            allow_prior_grades=grade is not None and scoped_subject is not None,
         )
         diagnostics = RetrievalDiagnostics(query=query, scope=scope)
         total = Timer()
@@ -150,8 +174,91 @@ class HybridRetriever:
             },
         )
 
+        rewrite_timer = Timer()
+        emit(observer, "rewrite_started")
+        rewrite = self._rewrite_query(
+            query,
+            grade=scope.grade,
+            subject=scope.subject,
+            image_path=image_path,
+        )
+        search_query = rewrite.retrieval_query
+        diagnostics.retrieval_query = search_query
+        diagnostics.rewrite_intent = rewrite.intent
+        diagnostics.rewrite_fallback = rewrite.fallback
+        diagnostics.rewrite_input_kind = rewrite.input_kind
+        diagnostics.transcribed_question = rewrite.transcribed_question
+        diagnostics.timings_ms["rewrite"] = rewrite_timer.stop() * 1000
+        if rewrite.fallback:
+            diagnostics.notes.append(
+                f"query rewrite fallback: {rewrite.reason or 'using original query'}"
+            )
+        else:
+            diagnostics.notes.append(
+                f"rewritten query: {search_query!r} (intent={rewrite.intent})"
+            )
+        emit(
+            observer,
+            "rewrite_completed",
+            original_query=query,
+            retrieval_query=search_query,
+            intent=rewrite.intent,
+            input_kind=rewrite.input_kind,
+            transcribed_question=rewrite.transcribed_question,
+            fallback=rewrite.fallback,
+            reason=rewrite.reason,
+            elapsed_ms=diagnostics.timings_ms["rewrite"],
+            summary=(
+                "fallback to original query"
+                if rewrite.fallback
+                else f"intent={rewrite.intent}"
+            ),
+        )
+
+        image_hits: list[ImageHit] = []
+        image_chunks: list[RetrievedChunk] = []
+        student_image = Path(image_path) if image_path else None
+        emit(observer, "image_started")
+        if student_image is not None and student_image.is_file():
+            image_retriever = ImageRetriever(
+                self.store,
+                self.image_embedder,
+                self.config.retrieval,
+                embedding_version=self.config.image_embedding_version,
+            )
+            try:
+                image_hits, image_chunks = image_retriever.retrieve(
+                    student_image, scope=scope
+                )
+            finally:
+                self.image_embedder.unload()
+            diagnostics.image = image_chunks
+            diagnostics.image_hits = [hit.to_dict() for hit in image_hits]
+            diagnostics.timings_ms["image"] = image_retriever.last_timing_ms
+            if image_retriever.last_note:
+                diagnostics.notes.append(image_retriever.last_note)
+            diagnostics.notes.append(
+                f"image kNN: {len(image_hits)} figures, {len(image_chunks)} page chunks"
+            )
+            emit(
+                observer,
+                "image_completed",
+                image_hits=diagnostics.image_hits,
+                elapsed_ms=image_retriever.last_timing_ms,
+                summary=f"{len(image_hits)} figure hits",
+            )
+        else:
+            emit(
+                observer,
+                "image_completed",
+                skipped=True,
+                image_hits=[],
+                elapsed_ms=0.0,
+                summary="no student image",
+            )
+
         emit(observer, "dense_started")
-        dense_results = self.dense.retrieve(query, scope=scope)
+        dense_results = self.dense.retrieve(search_query, scope=scope)
         diagnostics.dense = dense_results
         diagnostics.timings_ms["dense"] = self.dense.last_timing_ms
         diagnostics.notes.append(f"dense strategy: {self.dense.last_strategy}")
@@ -165,13 +272,15 @@ class HybridRetriever:
         )
 
         emit(observer, "lexical_started")
-        lexical_results = self.lexical.retrieve(query, scope=scope)
+        lexical_results = self.lexical.retrieve(search_query, scope=scope)
         diagnostics.fulltext = lexical_results
         diagnostics.timings_ms["fulltext"] = self.lexical.last_timing_ms
         diagnostics.notes.append(
             f"lucene query: {self.lexical.last_lucene_query or '(empty)'}"
         )
-        lexical_trace = _build_lexical_trace(query, self.lexical.last_lucene_query, lexical_results)
+        lexical_trace = _build_lexical_trace(
+            search_query, self.lexical.last_lucene_query, lexical_results
+        )
         emit(
             observer,
             "lexical_completed",
@@ -203,7 +312,7 @@ class HybridRetriever:
                 summary=graph_summary,
             )
 
-        if not (dense_results or lexical_results or graph_results):
+        if not (dense_results or lexical_results or graph_results or image_chunks):
             diagnostics.notes.append("all channels returned zero candidates")
             diagnostics.timings_ms["total"] = total.stop() * 1000
             LOGGER.warning(
@@ -217,6 +326,7 @@ class HybridRetriever:
                     weight_dense=self.config.retrieval.weight_dense,
                     weight_fulltext=self.config.retrieval.weight_fulltext,
                     weight_graph=self.config.retrieval.weight_graph,
+                    weight_image=self.config.retrieval.weight_image,
                 ),
                 elapsed_ms=0.0,
                 summary="no candidates",
@@ -236,6 +346,7 @@ class HybridRetriever:
             copy.deepcopy(lexical_results),
             copy.deepcopy(graph_results),
             self.config.retrieval,
+            image=copy.deepcopy(image_chunks),
         )
         diagnostics.fused = fused
         diagnostics.timings_ms["fusion"] = fusion_timer.stop() * 1000
@@ -254,7 +365,7 @@ class HybridRetriever:
         selected: list[RetrievedChunk]
         if rerank and fused:
             rerank_timer = Timer()
-            scored = self.reranker.rerank(query, copy.deepcopy(fused), top_k=None)
+            scored = self.reranker.rerank(search_query, copy.deepcopy(fused), top_k=None)
             diagnostics.reranked = scored
             selected = select_final_evidence(
                 scored,
@@ -294,6 +405,10 @@ class HybridRetriever:
         )
         if want_images:
             self._attach_images(selected)
+        diagnostics.attached_figures = []
+        diagnostics.notes.append(
+            "textbook figures are not shown in the answer; student photos are input-only"
+        )
 
         if observer is not None:
             annotate_later_status(dense_trace.candidates, fused_ids, evidence_ids)
@@ -313,7 +428,27 @@ class HybridRetriever:
         for chunk in chunks:
             chunk.images = images.get(chunk.chunk_id, [])
 
+    def _rewrite_query(
+        self,
+        query: str,
+        *,
+        grade: int | None,
+        subject: str | None,
+        image_path: str | Path | None = None,
+    ) -> QueryRewriteResult:
+        """Load the 2B rewriter, rewrite, then unload before SigLIP/BGE-M3."""
+        try:
+            result = self.rewriter.rewrite(
+                query, grade=grade, subject=subject, image_path=image_path
+            )
+        finally:
+            self.rewriter.unload()
+        return result
+
     def release_models(self) -> None:
+        self.rewriter.unload()
+        if self._image_embedder is not None:
+            self._image_embedder.unload()
         self.embedder.unload()
         self.reranker.unload()
 
@@ -332,6 +467,9 @@ class RagResult:
     generation_ms: float = 0.0
     notes: list[str] = field(default_factory=list)
     trace: dict[str, Any] | None = None
+    image_paths: list[str] = field(default_factory=list)
+    attached_figures: list[dict[str, Any]] = field(default_factory=list)
+    student_image_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -346,6 +484,8 @@ class RagResult:
             "diagnostics": self.retrieval.diagnostics.to_dict(),
             "notes": list(self.notes),
             "trace": self.trace,
+            "attached_figures": list(self.attached_figures),
+            "image_paths": list(self.image_paths),
         }
 
 
@@ -379,6 +519,29 @@ class SocraticRagPipeline:
         """Free the embedder and reranker before the generator is loaded."""
         self.retriever.release_models()
 
+    def _release_for_generation(self) -> None:
+        """Drop BGE/reranker/SigLIP so the tutor can claim the GPU."""
+        self.release_retrieval_models()
+        empty_cuda_cache()
+
+    def _maybe_unload_generator_for_retrieval(self) -> None:
+        """On small GPUs, the 8B tutor must leave before the rewriter/BGE load."""
+        generator = self._generator
+        if generator is None or not generator.is_loaded:
+            return
+        stats = cuda_memory_gib()
+        if stats is None:
+            return
+        free, total = stats
+        if generator_should_yield_gpu(free, total):
+            LOGGER.info(
+                "Unloading the tutor (%.1f GiB free of %.1f GiB) so retrieval "
+                "can use the GPU",
+                free,
+                total,
+            )
+            generator.unload()
+
     # -- stages ------------------------------------------------------------ #
 
     def prepare(
@@ -387,11 +550,11 @@ class SocraticRagPipeline:
         *,
         grade: int | None = None,
         subject: str | None = None,
-        unit: str | None = None,
         requested_state: TutorState | None = None,
         observer: TraceObserver | None = None,
         retrieval_only: bool = False,
         strict: bool = False,
+        image_path: str | Path | None = None,
         **retrieval_kwargs: Any,
     ) -> RagResult:
         """Run everything except generation.
@@ -399,6 +562,8 @@ class SocraticRagPipeline:
         Returns a :class:`RagResult` whose ``answered`` flag says whether the
         generator should be called at all.
         """
+        grade, subject = validate_scope(grade, subject)
+        self._maybe_unload_generator_for_retrieval()
         emit(
             observer,
             "run_started",
@@ -406,10 +571,6 @@ class SocraticRagPipeline:
             filters={
                 "grade": grade,
                 "subject": subject,
-                "unit": unit,
-                "resource_type": retrieval_kwargs.get("resource_type"),
-                "audience": retrieval_kwargs.get("audience"),
-                "document_id": retrieval_kwargs.get("document_id"),
             },
             requested_state=requested_state.value if requested_state else None,
             retrieval_only=retrieval_only,
@@ -419,27 +580,34 @@ class SocraticRagPipeline:
             query,
             grade=grade,
             subject=subject,
-            unit=unit,
             observer=observer,
+            image_path=image_path,
             **retrieval_kwargs,
         )
+        transcribed = retrieval.diagnostics.transcribed_question
+        display_query = (query or "").strip() or transcribed or query
+        tutor_question = transcribed or display_query
+        gate_query = retrieval.diagnostics.retrieval_query or tutor_question
         decision = self.gate.evaluate(
-            query, retrieval.results, scope=retrieval.scope
+            gate_query, retrieval.results, scope=retrieval.scope
         )
+        figures: list[dict[str, Any]] = []
         evidence_trace = _build_evidence_trace(decision, self.config.evidence)
         emit(
             observer,
             "evidence_completed",
             evidence=evidence_trace,
+            attached_figures=figures,
             elapsed_ms=0.0,
             summary="sufficient" if decision.sufficient else "insufficient",
         )
         turn = self.controller.build_turn(
-            query,
+            tutor_question,
             decision,
             scope=retrieval.scope,
             fallback_evidence=retrieval.results[:2],
             requested_state=requested_state,
+            attached_figures=figures,
         )
         prompt_trace = _build_prompt_trace(turn, self.config.models)
         emit(
@@ -450,12 +618,20 @@ class SocraticRagPipeline:
             summary=turn.state.value,
         )
         result = RagResult(
-            query=query,
+            query=display_query,
             scope=retrieval.scope,
             retrieval=retrieval,
             decision=decision,
             turn=turn,
             answered=decision.sufficient,
+            attached_figures=figures,
+            student_image_path=str(image_path) if image_path else None,
+        )
+        extra_allowed = [image_path] if image_path else []
+        result.image_paths = select_vision_image_paths(
+            [str(image_path)] if image_path else [],
+            images_dir=self.config.paths.images_dir,
+            extra_allowed=extra_allowed,
         )
         if observer is not None:
             fused_ids = {c.chunk_id for c in retrieval.diagnostics.fused}
@@ -478,11 +654,16 @@ class SocraticRagPipeline:
         ``INSUFFICIENT_EVIDENCE`` state, where it must decline rather than answer
         from general knowledge.
         """
+        self._release_for_generation()
         timer = Timer()
         pieces: list[str] = []
         emit(observer, "generation_started")
         try:
-            for piece in self.generator.stream(result.turn.messages, settings=settings):
+            for piece in self.generator.stream(
+                result.turn.messages,
+                settings=settings,
+                image_paths=result.image_paths,
+            ):
                 pieces.append(piece)
                 emit(observer, "generation_token", token=piece)
                 yield piece
@@ -501,13 +682,13 @@ class SocraticRagPipeline:
         *,
         grade: int | None = None,
         subject: str | None = None,
-        unit: str | None = None,
         generate_on_insufficient_evidence: bool = True,
         on_token: Any = None,
         settings: GenerationSettings | None = None,
         observer: TraceObserver | None = None,
         retrieval_only: bool = False,
         requested_state: TutorState | None = None,
+        image_path: str | Path | None = None,
         **retrieval_kwargs: Any,
     ) -> RagResult:
         """Full pipeline. Generation is skipped when evidence is insufficient
@@ -517,11 +698,11 @@ class SocraticRagPipeline:
                 query,
                 grade=grade,
                 subject=subject,
-                unit=unit,
                 requested_state=requested_state,
                 observer=observer,
                 retrieval_only=retrieval_only,
                 strict=not generate_on_insufficient_evidence,
+                image_path=image_path,
                 **retrieval_kwargs,
             )
 
@@ -577,6 +758,84 @@ class SocraticRagPipeline:
                 stage="generator",
             )
             raise
+
+
+def _select_attached_figures(
+    *,
+    kept: Sequence[RetrievedChunk],
+    image_hits: Sequence[ImageHit],
+    images_dir: Path,
+    min_score: float,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Textbook figures only when a visual is required: image kNN, then kept-page."""
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def _try_add(
+        image_id: str,
+        local_path: str,
+        *,
+        page_number: Any = None,
+        score: float | None = None,
+        source: str,
+        grade: Any = None,
+        subject: Any = None,
+        unit_title: Any = None,
+    ) -> bool:
+        if not image_id or image_id in seen:
+            return False
+        resolved = resolve_curriculum_image(local_path, images_dir)
+        if resolved is None:
+            return False
+        safe = ensure_browser_png(
+            resolved, cache_root=browser_png_cache_dir(images_dir)
+        )
+        seen.add(image_id)
+        selected.append(
+            {
+                "image_id": image_id,
+                "local_path": str(safe),
+                "page_number": page_number,
+                "score": score,
+                "source": source,
+                "grade": grade,
+                "subject": subject,
+                "unit_title": unit_title,
+            }
+        )
+        return True
+
+    ordered_hits = sorted(image_hits, key=lambda hit: hit.score, reverse=True)
+    for hit in ordered_hits:
+        if hit.score < min_score:
+            continue
+        _try_add(
+            hit.image_id,
+            hit.local_path,
+            page_number=hit.page_number,
+            score=hit.score,
+            source="image_knn",
+            grade=hit.grade,
+            subject=hit.subject,
+        )
+        if len(selected) >= limit:
+            return selected
+
+    for chunk in kept:
+        for image in chunk.images:
+            _try_add(
+                str(image.get("image_id") or ""),
+                str(image.get("local_path") or ""),
+                page_number=image.get("page_number"),
+                source="kept_page",
+                grade=chunk.grade,
+                subject=chunk.subject,
+                unit_title=chunk.unit_title,
+            )
+            if len(selected) >= limit:
+                return selected
+    return selected
 
 
 def _build_dense_trace(
@@ -645,6 +904,7 @@ def _build_fusion_trace(fused: Sequence[RetrievedChunk], config: Any) -> FusionT
         weight_dense=config.weight_dense,
         weight_fulltext=config.weight_fulltext,
         weight_graph=config.weight_graph,
+        weight_image=getattr(config, "weight_image", 1.0),
         candidates=candidates,
     )
 
@@ -682,6 +942,7 @@ def _build_evidence_trace(decision: EvidenceDecision, config: Any) -> EvidenceTr
         "scope_match": True if config.require_scope_match else None,
         "query_term_overlap": config.min_query_term_overlap,
         "minimum_chunks": config.min_chunks,
+        "min_prior_grade_rerank_score": config.min_prior_grade_rerank_score,
         "reranked": None,
     }
     checks = [

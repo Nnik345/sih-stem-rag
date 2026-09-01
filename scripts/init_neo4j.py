@@ -125,7 +125,23 @@ def main() -> int:
                 f"Embedding dimension read from "
                 f"{config.models.embedding_model_path.name}/config.json: {dimension}\n"
             )
-            report = initialize_schema(store, dimension)
+            image_dim = None
+            try:
+                from rag.image_embeddings import read_image_hidden_size
+
+                image_dim = read_image_hidden_size(
+                    config.models.image_embedding_model_path
+                )
+                print(
+                    f"Image embedding dimension read from "
+                    f"{config.models.image_embedding_model_path.name}/config.json: "
+                    f"{image_dim}\n"
+                )
+            except Exception:
+                print("SigLIP config not found; image vector index will be created by embed_images.py\n")
+            report = initialize_schema(
+                store, dimension, image_embedding_dimension=image_dim
+            )
             print("Schema created/verified")
             print(report.describe())
             print()

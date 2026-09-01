@@ -65,6 +65,8 @@ class TestTraceModels:
         assert set(payload["stages"]) == {
             "query",
             "filters",
+            "rewrite",
+            "image",
             "dense",
             "lexical",
             "graph",
@@ -299,12 +301,14 @@ class TestChannelTraces:
         models = ModelConfig(
             embedding_model_path=Path("models/bge-m3"),
             reranker_model_path=Path("models/bge-reranker-v2-m3"),
+            rewriter_model_path=Path("models/qwen3-vl-2b-instruct"),
             generator_model_path=Path("models/qwen3-vl-8b-instruct"),
+            image_embedding_model_path=Path("models/siglip-base-patch16-224"),
         )
         trace = _build_prompt_trace(turn, models)
         assert trace.system_prompt == turn.system_prompt
         assert trace.user_prompt == turn.user_prompt
         assert turn.messages[0]["content"] == trace.system_prompt
         assert turn.messages[1]["content"] == trace.user_prompt
-        assert trace.tutor_state == TutorState.ASK_QUESTION.value
+        assert trace.tutor_state == TutorState.GIVE_HINT.value
         assert trace.evidence_blocks[0]["chunk_id"] == "c1"

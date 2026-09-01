@@ -1,9 +1,9 @@
-"""Weighted Reciprocal Rank Fusion across the three retrieval channels.
+"""Weighted Reciprocal Rank Fusion across the retrieval channels.
 
 Raw channel scores are never added together: a Neo4j cosine similarity (0..1), a
-Lucene BM25-style score (unbounded) and a graph-expansion weight live on
-different scales, and summing them would silently let one channel dominate. RRF
-uses only *ranks*, which is scale-free:
+Lucene BM25-style score (unbounded), a graph-expansion weight and an image-kNN
+score live on different scales, and summing them would silently let one channel
+dominate. RRF uses only *ranks*, which is scale-free:
 
     score(chunk) = sum over channels of  weight_channel / (k + rank_channel)
 
@@ -27,6 +27,7 @@ from .schemas import (
     CHANNEL_DENSE,
     CHANNEL_FULLTEXT,
     CHANNEL_GRAPH,
+    CHANNEL_IMAGE,
     RetrievedChunk,
 )
 
@@ -89,6 +90,9 @@ def _merge_into(target: RetrievedChunk, source: RetrievedChunk) -> None:
         "graph_score",
         "graph_expansion_path",
         "graph_seed_chunk_id",
+        "image_rank",
+        "image_score",
+        "matched_image_id",
     ):
         value = getattr(source, field_name)
         if value is not None and getattr(target, field_name) is None:
@@ -212,14 +216,18 @@ def fuse_standard_channels(
     fulltext: Sequence[RetrievedChunk],
     graph: Sequence[RetrievedChunk],
     config: RetrievalConfig,
+    image: Sequence[RetrievedChunk] = (),
 ) -> list[RetrievedChunk]:
-    """Fuse the three retrieval channels using the configured weights."""
+    """Fuse the retrieval channels using the configured weights."""
+    channels = [
+        ChannelResults(CHANNEL_DENSE, dense, config.weight_dense),
+        ChannelResults(CHANNEL_FULLTEXT, fulltext, config.weight_fulltext),
+        ChannelResults(CHANNEL_GRAPH, graph, config.weight_graph),
+    ]
+    if image:
+        channels.append(ChannelResults(CHANNEL_IMAGE, image, config.weight_image))
     return fuse(
-        [
-            ChannelResults(CHANNEL_DENSE, dense, config.weight_dense),
-            ChannelResults(CHANNEL_FULLTEXT, fulltext, config.weight_fulltext),
-            ChannelResults(CHANNEL_GRAPH, graph, config.weight_graph),
-        ],
+        channels,
         k=config.rrf_k,
         top_k=config.fusion_top_k,
     )

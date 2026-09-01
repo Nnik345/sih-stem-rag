@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Any
 
 SUPPORTED_GRADES = tuple(range(1, 13))
-SUPPORTED_SUBJECTS = ("mathematics", "science")
+SUPPORTED_SUBJECTS = ("mathematics", "science", "physics", "chemistry", "biology")
+PCB_SUBJECTS = ("physics", "chemistry", "biology")
 
 SOURCE_NCERT = "ncert_textbook"
 
@@ -111,18 +112,18 @@ NCERT_BOOKS: tuple[NcertBook, ...] = (
     NcertBook(10, "mathematics", "Mathematics", "jemh1", "mathematics"),
     NcertBook(10, "science", "Science", "jesc1", "science"),
     NcertBook(11, "mathematics", "Mathematics", "kemh1", "mathematics"),
-    NcertBook(11, "science", "Physics Part I", "keph1", "physics_part_1", 1),
-    NcertBook(11, "science", "Physics Part II", "keph2", "physics_part_2", 2),
-    NcertBook(11, "science", "Chemistry Part I", "kech1", "chemistry_part_1", 1),
-    NcertBook(11, "science", "Chemistry Part II", "kech2", "chemistry_part_2", 2),
-    NcertBook(11, "science", "Biology", "kebo1", "biology"),
+    NcertBook(11, "physics", "Physics Part I", "keph1", "physics_part_1", 1),
+    NcertBook(11, "physics", "Physics Part II", "keph2", "physics_part_2", 2),
+    NcertBook(11, "chemistry", "Chemistry Part I", "kech1", "chemistry_part_1", 1),
+    NcertBook(11, "chemistry", "Chemistry Part II", "kech2", "chemistry_part_2", 2),
+    NcertBook(11, "biology", "Biology", "kebo1", "biology"),
     NcertBook(12, "mathematics", "Mathematics Part I", "lemh1", "mathematics_part_1", 1),
     NcertBook(12, "mathematics", "Mathematics Part II", "lemh2", "mathematics_part_2", 2),
-    NcertBook(12, "science", "Physics Part I", "leph1", "physics_part_1", 1),
-    NcertBook(12, "science", "Physics Part II", "leph2", "physics_part_2", 2),
-    NcertBook(12, "science", "Chemistry Part I", "lech1", "chemistry_part_1", 1),
-    NcertBook(12, "science", "Chemistry Part II", "lech2", "chemistry_part_2", 2),
-    NcertBook(12, "science", "Biology", "lebo1", "biology"),
+    NcertBook(12, "physics", "Physics Part I", "leph1", "physics_part_1", 1),
+    NcertBook(12, "physics", "Physics Part II", "leph2", "physics_part_2", 2),
+    NcertBook(12, "chemistry", "Chemistry Part I", "lech1", "chemistry_part_1", 1),
+    NcertBook(12, "chemistry", "Chemistry Part II", "lech2", "chemistry_part_2", 2),
+    NcertBook(12, "biology", "Biology", "lebo1", "biology"),
 )
 
 _SKIP_ZIP_SUBSTRINGS = (
@@ -135,6 +136,104 @@ _SKIP_ZIP_SUBSTRINGS = (
     ".png",
     "prelim",
 )
+
+
+def subjects_for_grade(grade: int) -> tuple[str, ...]:
+    """User-facing subjects offered at this class. Science splits into PCB at 11–12."""
+    if grade in (1, 2):
+        return ("mathematics",)
+    if 3 <= grade <= 10:
+        return ("mathematics", "science")
+    if grade in (11, 12):
+        return ("mathematics", "physics", "chemistry", "biology")
+    return ()
+
+
+def lineage_subjects(subject: str) -> tuple[str, ...]:
+    """Subjects that may appear in prior-grade lookback for ``subject``.
+
+    Mathematics stays mathematics. Science stays science. Physics, chemistry
+    and biology keep that PCB label at classes 11–12 and may also use
+    ``science`` from classes 3–10. Lineages never cross (maths ↮ science/PCB;
+    physics ↮ chemistry).
+    """
+    lowered = (subject or "").strip().lower()
+    if lowered == "mathematics":
+        return ("mathematics",)
+    if lowered == "science":
+        return ("science",)
+    if lowered in PCB_SUBJECTS:
+        return (lowered, "science")
+    if lowered:
+        return (lowered,)
+    return ()
+
+
+def in_lineage_scope(
+    *,
+    chunk_grade: int | None,
+    chunk_subject: str | None,
+    current_grade: int | None,
+    current_subject: str | None,
+    allow_prior_grades: bool = False,
+) -> bool:
+    """Whether a chunk sits in the caller's class or an allowed earlier class."""
+    if current_grade is not None:
+        if chunk_grade is None:
+            return False
+        if allow_prior_grades:
+            if int(chunk_grade) > int(current_grade):
+                return False
+        elif int(chunk_grade) != int(current_grade):
+            return False
+    if current_subject is not None:
+        subject = (chunk_subject or "").strip().lower()
+        wanted = (current_subject or "").strip().lower()
+        if allow_prior_grades:
+            if subject not in lineage_subjects(wanted):
+                return False
+        elif subject != wanted:
+            return False
+    return True
+
+
+def corpus_dir_subject(subject: str) -> str:
+    """On-disk folder under ``curriculum/raw/ncert/``.
+
+    Class 11–12 physics/chemistry/biology books were first downloaded under
+    ``science/``; keep that layout so re-ingest does not require a re-download.
+    """
+    if subject in PCB_SUBJECTS:
+        return "science"
+    return subject
+
+
+def curriculum_options() -> dict[str, Any]:
+    return {
+        "grades": list(SUPPORTED_GRADES),
+        "subjects": list(SUPPORTED_SUBJECTS),
+        "subjects_by_grade": {
+            str(grade): list(subjects_for_grade(grade)) for grade in SUPPORTED_GRADES
+        },
+    }
+
+
+def validate_scope(grade: int | None, subject: str | None) -> tuple[int, str]:
+    """Require a legal (grade, subject) pair. Never inferred from the question."""
+    if grade is None:
+        raise ValueError("Grade is required.")
+    if grade not in SUPPORTED_GRADES:
+        raise ValueError("Grade must be an integer from 1 to 12.")
+    if subject is None or not str(subject).strip():
+        raise ValueError("Subject is required.")
+    lowered = str(subject).strip().lower()
+    allowed = subjects_for_grade(grade)
+    if lowered not in allowed:
+        raise ValueError(
+            f"Subject {lowered!r} is not offered in class {grade}. "
+            f"Choose one of: {', '.join(allowed)}."
+        )
+    return grade, lowered
 
 
 def ncert_zip_url(code: str) -> str:
@@ -186,7 +285,8 @@ def _book_to_source(book: NcertBook) -> SourceFile:
         official_page_url=NCERT_TEXTBOOK_PAGE,
         direct_download_url=ncert_zip_url(book.code),
         local_path=(
-            f"raw/ncert/{book.subject}/grade_{book.grade:02d}/{slug}/student"
+            f"raw/ncert/{corpus_dir_subject(book.subject)}"
+            f"/grade_{book.grade:02d}/{slug}/student"
         ),
         grade=book.grade,
         subject=book.subject,

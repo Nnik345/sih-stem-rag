@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import { GRADES, subjectsForGrade } from "../curriculum";
 import type { QueryFormState } from "../types";
 import { validateQueryForm } from "../validation";
 
@@ -12,14 +13,36 @@ interface Props {
 
 export function QueryPanel({ form, errors, running, onChange, onSubmit }: Props) {
   const [localErrors, setLocalErrors] = useState<Record<string, string>>({});
+  const [subjectsByGrade, setSubjectsByGrade] = useState<Record<string, string[]> | null>(null);
   const shown = { ...errors, ...localErrors };
+  const gradeNum = Number(form.grade);
+  const subjects =
+    (form.grade && subjectsByGrade?.[form.grade]) ||
+    (Number.isInteger(gradeNum) ? subjectsForGrade(gradeNum) : []);
+
+  useEffect(() => {
+    if (typeof fetch !== "function") return;
+    fetch("/api/curriculum-options")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { subjects_by_grade?: Record<string, string[]> } | null) => {
+        if (data?.subjects_by_grade) setSubjectsByGrade(data.subjects_by_grade);
+      })
+      .catch(() => undefined);
+  }, []);
 
   function update<K extends keyof QueryFormState>(key: K, value: QueryFormState[K]) {
-    onChange({ ...form, [key]: value });
+    let next: QueryFormState = { ...form, [key]: value };
+    if (key === "grade") {
+      const allowed = subjectsForGrade(Number(value));
+      if (next.subject && !allowed.includes(next.subject)) {
+        next = { ...next, subject: "" };
+      }
+    }
+    onChange(next);
     if (localErrors[key as string]) {
-      const next = { ...localErrors };
-      delete next[key as string];
-      setLocalErrors(next);
+      const cleared = { ...localErrors };
+      delete cleared[key as string];
+      setLocalErrors(cleared);
     }
   }
 
@@ -40,17 +63,34 @@ export function QueryPanel({ form, errors, running, onChange, onSubmit }: Props)
           onChange={(e) => update("query", e.target.value)}
           rows={3}
           placeholder="what are the components of food"
-            aria-invalid={Boolean(shown.query)}
+          aria-invalid={Boolean(shown.query)}
         />
         {shown.query ? <span className="field-error">{shown.query}</span> : null}
+      </label>
+      <label className="query-label">
+        Student photo (optional)
+        <input
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          onChange={(e) => update("imageFile", e.target.files?.[0] ?? null)}
+        />
+        {form.imageFile ? (
+          <span className="muted">{form.imageFile.name}</span>
+        ) : (
+          <span className="muted">JPEG, PNG, WebP, or GIF. Question may be empty if a photo is attached.</span>
+        )}
       </label>
       <div className="query-grid">
         <label>
           Grade
-          <select value={form.grade} onChange={(e) => update("grade", e.target.value)}>
-            <option value="">Any</option>
-            {Array.from({ length: 12 }, (_, i) => String(i + 1)).map((g) => (
-              <option key={g} value={g}>
+          <select
+            value={form.grade}
+            required
+            onChange={(e) => update("grade", e.target.value)}
+          >
+            <option value="">Select class</option>
+            {GRADES.map((g) => (
+              <option key={g} value={String(g)}>
                 {g}
               </option>
             ))}
@@ -59,38 +99,28 @@ export function QueryPanel({ form, errors, running, onChange, onSubmit }: Props)
         </label>
         <label>
           Subject
-          <select value={form.subject} onChange={(e) => update("subject", e.target.value)}>
-            <option value="">Any</option>
-            <option value="science">science</option>
-            <option value="mathematics">mathematics</option>
+          <select
+            value={form.subject}
+            required
+            disabled={!form.grade}
+            onChange={(e) => update("subject", e.target.value)}
+          >
+            <option value="">{form.grade ? "Select subject" : "Select class first"}</option>
+            {subjects.map((subject) => (
+              <option key={subject} value={subject}>
+                {subject}
+              </option>
+            ))}
           </select>
           {shown.subject ? <span className="field-error">{shown.subject}</span> : null}
         </label>
         <label>
-          Unit ID
-          <input value={form.unit} onChange={(e) => update("unit", e.target.value)} />
-        </label>
-        <label>
-          Resource type
-          <input value={form.resource_type} onChange={(e) => update("resource_type", e.target.value)} />
-        </label>
-        <label>
-          Audience
-          <input value={form.audience} onChange={(e) => update("audience", e.target.value)} />
-        </label>
-        <label>
-          Document ID
-          <input value={form.document_id} onChange={(e) => update("document_id", e.target.value)} />
-        </label>
-        <label>
           Tutor state
           <select value={form.tutor_state} onChange={(e) => update("tutor_state", e.target.value)}>
-            <option value="">ASK_QUESTION (default)</option>
-            <option value="ASK_QUESTION">ASK_QUESTION</option>
+            <option value="">GIVE_HINT (default)</option>
             <option value="GIVE_HINT">GIVE_HINT</option>
-            <option value="CORRECT_MISCONCEPTION">CORRECT_MISCONCEPTION</option>
             <option value="EXPLAIN_CONCEPT">EXPLAIN_CONCEPT</option>
-            <option value="CONFIRM_STEP">CONFIRM_STEP</option>
+            <option value="CONFIRM_ANSWER">CONFIRM_ANSWER</option>
           </select>
         </label>
       </div>

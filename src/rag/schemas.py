@@ -419,7 +419,8 @@ class ConceptMention:
 CHANNEL_DENSE = "dense"
 CHANNEL_FULLTEXT = "fulltext"
 CHANNEL_GRAPH = "graph"
-ALL_CHANNELS = (CHANNEL_DENSE, CHANNEL_FULLTEXT, CHANNEL_GRAPH)
+CHANNEL_IMAGE = "image"
+ALL_CHANNELS = (CHANNEL_DENSE, CHANNEL_FULLTEXT, CHANNEL_GRAPH, CHANNEL_IMAGE)
 
 
 @dataclass(frozen=True)
@@ -439,6 +440,9 @@ class RetrievalFilter:
     document_id: str | None = None
     include_evaluation: bool = False
     alignment_strict: bool = False
+    # When True, retrieval may include earlier classes in the same subject
+    # lineage (PCB also searches class 3–10 science). Never a higher class.
+    allow_prior_grades: bool = False
 
     def is_empty(self) -> bool:
         return all(
@@ -468,6 +472,8 @@ class RetrievalFilter:
             )
             if getattr(self, name) is not None
         }
+        if self.allow_prior_grades:
+            active["allow_prior_grades"] = True
         return "corpus-wide (no filter)" if not active else str(active)
 
 
@@ -522,6 +528,9 @@ class RetrievedChunk:
     # How graph expansion reached this chunk, e.g. "SAME_SECTION via <chunk_id>".
     graph_expansion_path: str | None = None
     graph_seed_chunk_id: str | None = None
+    image_rank: int | None = None
+    image_score: float | None = None
+    matched_image_id: str | None = None
 
     rrf_score: float | None = None
     rrf_rank: int | None = None
@@ -545,7 +554,7 @@ class RetrievedChunk:
         for value in (self.rerank_score, self.rrf_score):
             if value is not None:
                 return value
-        for value in (self.dense_score, self.fulltext_score, self.graph_score):
+        for value in (self.dense_score, self.fulltext_score, self.graph_score, self.image_score):
             if value is not None:
                 return value
         return 0.0
@@ -628,6 +637,9 @@ class RetrievedChunk:
             "graph_score": self.graph_score,
             "graph_expansion_path": self.graph_expansion_path,
             "graph_seed_chunk_id": self.graph_seed_chunk_id,
+            "image_rank": self.image_rank,
+            "image_score": self.image_score,
+            "matched_image_id": self.matched_image_id,
             "rrf_score": self.rrf_score,
             "rrf_rank": self.rrf_rank,
             "rrf_contributions": dict(self.rrf_contributions),
@@ -648,9 +660,17 @@ class RetrievalDiagnostics:
 
     query: str
     scope: RetrievalFilter
+    retrieval_query: str = ""
+    rewrite_intent: str = ""
+    rewrite_fallback: bool = False
+    rewrite_input_kind: str = ""
+    transcribed_question: str = ""
     dense: list[RetrievedChunk] = field(default_factory=list)
     fulltext: list[RetrievedChunk] = field(default_factory=list)
     graph: list[RetrievedChunk] = field(default_factory=list)
+    image: list[RetrievedChunk] = field(default_factory=list)
+    image_hits: list[dict[str, Any]] = field(default_factory=list)
+    attached_figures: list[dict[str, Any]] = field(default_factory=list)
     fused: list[RetrievedChunk] = field(default_factory=list)
     reranked: list[RetrievedChunk] = field(default_factory=list)
     graph_seeds: list[str] = field(default_factory=list)
@@ -663,6 +683,7 @@ class RetrievalDiagnostics:
             "dense": len(self.dense),
             "fulltext": len(self.fulltext),
             "graph": len(self.graph),
+            "image": len(self.image),
             "fused": len(self.fused),
             "reranked": len(self.reranked),
         }
@@ -670,6 +691,11 @@ class RetrievalDiagnostics:
     def to_dict(self) -> dict[str, Any]:
         return {
             "query": self.query,
+            "retrieval_query": self.retrieval_query,
+            "rewrite_intent": self.rewrite_intent,
+            "rewrite_fallback": self.rewrite_fallback,
+            "rewrite_input_kind": self.rewrite_input_kind,
+            "transcribed_question": self.transcribed_question,
             "scope": self.scope.describe(),
             "counts": self.channel_counts(),
             "graph_seeds": list(self.graph_seeds),
@@ -678,6 +704,9 @@ class RetrievalDiagnostics:
             "dense": [c.to_dict() for c in self.dense],
             "fulltext": [c.to_dict() for c in self.fulltext],
             "graph": [c.to_dict() for c in self.graph],
+            "image": [c.to_dict() for c in self.image],
+            "image_hits": list(self.image_hits),
+            "attached_figures": list(self.attached_figures),
             "fused": [c.to_dict() for c in self.fused],
             "reranked": [c.to_dict() for c in self.reranked],
             "graph_trace": self.graph_trace,

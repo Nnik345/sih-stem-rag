@@ -2,7 +2,9 @@
 
 This is the single place the generator is loaded. It uses the original
 non-quantized checkpoint in ``models/qwen3-vl-8b-instruct`` with
-``dtype="auto"`` and ``device_map="auto"``, plus token streaming.
+``dtype="auto"`` and ``device_map="auto"``. Weight placement follows free VRAM
+and physical RAM: leftover layers are offloaded to CPU, so a 32 GiB GPU can run
+the 8B tutor on-device while an 8 GiB GPU keeps most of it in RAM.
 
 ``scripts/test_generator.py`` calls into this module rather than reimplementing
 model loading.
@@ -13,15 +15,21 @@ through when given. Retrieved image paths travel as metadata only by default.
 
 from __future__ import annotations
 
-import gc
-import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 
 from .config import ModelConfig
+from .image_paths import select_vision_image_paths
 from .logging_utils import get_logger
+from .model_memory import (
+    adaptive_max_image_pixels,
+    cuda_max_memory_map,
+    cuda_memory_gib,
+    empty_cuda_cache,
+    tighter_max_memory_map,
+)
 
 LOGGER = get_logger(__name__)
 
@@ -56,11 +64,17 @@ class QwenGenerator:
         model_path: Path,
         *,
         settings: GenerationSettings | None = None,
-        vram_reserve_gib: float = 3.0,
+        vram_reserve_gib: float = 5.5,
+        vram_headroom_fraction: float = 0.25,
+        cpu_ram_fraction: float = 0.80,
+        max_image_pixels: int = 0,
     ) -> None:
         self.model_path = Path(model_path)
         self.settings = settings or GenerationSettings()
         self.vram_reserve_gib = vram_reserve_gib
+        self.vram_headroom_fraction = vram_headroom_fraction
+        self.cpu_ram_fraction = cpu_ram_fraction
+        self.max_image_pixels = max_image_pixels
         self._model = None
         self._processor = None
 
@@ -73,6 +87,9 @@ class QwenGenerator:
                 temperature=config.generator_temperature,
             ),
             vram_reserve_gib=config.generator_vram_reserve_gib,
+            vram_headroom_fraction=config.generator_vram_headroom_fraction,
+            cpu_ram_fraction=config.generator_cpu_ram_fraction,
+            max_image_pixels=config.generator_max_image_pixels,
         )
 
     # -- lifecycle --------------------------------------------------------- #
@@ -87,8 +104,7 @@ class QwenGenerator:
         if not self.model_path.is_dir():
             raise GeneratorError(
                 f"Generator model directory not found: {self.model_path}. Download "
-                f"it with: huggingface-cli download Qwen/Qwen3-VL-8B-Instruct "
-                f"--local-dir {self.model_path}"
+                f"it with: python scripts/download_qwen_models.py"
             )
         try:
             from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
@@ -101,22 +117,22 @@ class QwenGenerator:
 
         LOGGER.info("Loading Qwen3-VL processor from %s", self.model_path)
         try:
+            empty_cuda_cache()
             self._processor = AutoProcessor.from_pretrained(str(self.model_path))
+            self._limit_processor_pixels()
             LOGGER.info(
                 "Loading Qwen3-VL weights (device_map=auto; layers that do not fit "
-                "in device memory are offloaded to CPU, so generation is slow)"
+                "in device memory are offloaded to CPU RAM, so generation is slow "
+                "on small GPUs)"
             )
             max_memory = self._max_memory_map()
-            load_kwargs: dict[str, Any] = {"dtype": "auto", "device_map": "auto"}
+            load_kwargs: dict[str, Any] = {
+                "dtype": "auto",
+                "device_map": "auto",
+                "low_cpu_mem_usage": True,
+            }
             if max_memory is not None:
                 load_kwargs["max_memory"] = max_memory
-                LOGGER.info(
-                    "Capping generator weights at %s so ~%.1f GiB of device "
-                    "memory stays free for the prefill logits and KV cache; the "
-                    "remaining layers are offloaded to CPU",
-                    max_memory[0],
-                    self.vram_reserve_gib,
-                )
             try:
                 model = Qwen3VLForConditionalGeneration.from_pretrained(
                     str(self.model_path), **load_kwargs
@@ -124,18 +140,20 @@ class QwenGenerator:
             except Exception as capped_error:
                 if max_memory is None:
                     raise
-                # Fall back to the plain, already-validated load rather than
-                # failing outright because of the memory cap.
+                # Never retry without a cap: uncapped device_map fills the GPU
+                # with weights and OOMs on vision prefill. Offload more instead.
                 LOGGER.warning(
-                    "Capped load failed (%s); retrying with plain device_map=auto",
+                    "Capped load failed (%s); retrying with more CPU offload",
                     capped_error,
                 )
-                load_kwargs.pop("max_memory")
+                load_kwargs["max_memory"] = tighter_max_memory_map(max_memory)
+                empty_cuda_cache()
                 model = Qwen3VLForConditionalGeneration.from_pretrained(
                     str(self.model_path), **load_kwargs
                 )
             model.eval()
         except Exception as exc:
+            self._processor = None
             raise GeneratorError(
                 f"Could not load the generator from {self.model_path}: {exc}"
             ) from exc
@@ -144,44 +162,25 @@ class QwenGenerator:
         LOGGER.info("Qwen3-VL ready (device=%s)", getattr(model, "device", "unknown"))
 
     def _max_memory_map(self) -> dict[Any, str] | None:
-        """Per-device weight budgets, holding back memory for generation.
-
-        Returns ``None`` when there is no CUDA device or the reserve leaves too
-        little to be worth capping, in which case plain ``device_map="auto"``
-        is used. Accelerate only considers devices present in this map, so the
-        CPU entry is required for the offloaded layers.
-        """
-        if self.vram_reserve_gib <= 0:
-            return None
-        try:
-            import torch
-
-            if not torch.cuda.is_available():
-                return None
-            # Free, not total: other processes may already hold memory that the
-            # model can never use.
-            free_vram = torch.cuda.mem_get_info(0)[0] / 1024**3
-        except Exception as exc:
-            LOGGER.debug("Could not query device memory (%s); not capping", exc)
-            return None
-
-        gpu_budget = free_vram - self.vram_reserve_gib
-        if gpu_budget < 2.0:
-            LOGGER.warning(
-                "Only %.1f GiB of device memory is free and %.1f GiB is reserved for "
-                "generation, leaving %.1f GiB for weights; not capping",
-                free_vram,
-                self.vram_reserve_gib,
-                gpu_budget,
-            )
-            return None
-
-        # Offloaded layers live in RAM. Total (not currently-free) physical RAM
-        # is the right basis: the page cache is reclaimable.
-        total_ram = (
-            os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1024**3
+        """Per-device weight budgets from this machine's free VRAM and RAM."""
+        return cuda_max_memory_map(
+            vram_reserve_gib=self.vram_reserve_gib,
+            cpu_ram_fraction=self.cpu_ram_fraction,
+            headroom_fraction=self.vram_headroom_fraction,
         )
-        return {0: f"{gpu_budget:.1f}GiB", "cpu": f"{total_ram * 0.6:.0f}GiB"}
+
+    def _limit_processor_pixels(self) -> None:
+        stats = cuda_memory_gib()
+        total = stats[1] if stats else None
+        max_pixels = adaptive_max_image_pixels(total, self.max_image_pixels)
+        if max_pixels is None or self._processor is None:
+            return
+        image_processor = getattr(self._processor, "image_processor", None)
+        if image_processor is not None and hasattr(image_processor, "max_pixels"):
+            image_processor.max_pixels = max_pixels
+            LOGGER.info(
+                "Capping tutor vision at max_pixels=%d for this GPU", max_pixels
+            )
 
     def unload(self) -> None:
         if self._model is None:
@@ -189,14 +188,7 @@ class QwenGenerator:
         LOGGER.info("Releasing Qwen3-VL")
         self._model = None
         self._processor = None
-        gc.collect()
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except Exception:  # pragma: no cover - best effort cleanup
-            pass
+        empty_cuda_cache()
 
     def __enter__(self) -> "QwenGenerator":
         self.load()
@@ -211,6 +203,9 @@ class QwenGenerator:
     def _to_chat_messages(
         messages: Sequence[dict[str, str]],
         image_paths: Sequence[str] = (),
+        *,
+        images_dir: Path | None = None,
+        extra_allowed: Sequence[str] = (),
     ) -> list[dict[str, Any]]:
         """Convert plain {role, content} messages to Qwen3-VL content lists."""
         converted: list[dict[str, Any]] = []
@@ -219,10 +214,15 @@ class QwenGenerator:
                 {"type": "text", "text": message["content"]}
             ]
             converted.append({"role": message["role"], "content": content})
-        if image_paths and converted:
+        allowed = list(image_paths)
+        if images_dir is not None:
+            allowed = select_vision_image_paths(
+                image_paths, images_dir=images_dir, extra_allowed=extra_allowed
+            )
+        if allowed and converted:
             last = converted[-1]
             last["content"] = [
-                {"type": "image", "image": str(path)} for path in image_paths
+                {"type": "image", "image": str(path)} for path in allowed
             ] + last["content"]
         return converted
 
@@ -240,7 +240,24 @@ class QwenGenerator:
             return_dict=True,
             return_tensors="pt",
         )
-        return inputs.to(self._model.device)
+        return inputs.to(self._activation_device())
+
+    def _activation_device(self) -> Any:
+        """First device Accelerate placed, so inputs match a split model."""
+        import torch
+
+        mapping = getattr(self._model, "hf_device_map", None)
+        if mapping:
+            for loc in mapping.values():
+                if loc in ("cpu", "disk"):
+                    continue
+                if isinstance(loc, int):
+                    return torch.device(f"cuda:{loc}")
+                if isinstance(loc, str) and loc.startswith("cuda"):
+                    return torch.device(loc)
+            return torch.device("cpu")
+        device = getattr(self._model, "device", None)
+        return device if device is not None else torch.device("cpu")
 
     def stream(
         self,

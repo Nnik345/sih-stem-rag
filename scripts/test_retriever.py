@@ -7,7 +7,7 @@ behaviour can be understood and compared between configurations.
 
     python scripts/test_retriever.py -q "what are the components of food" -g 6 -s science
     python scripts/test_retriever.py -q "how does light reflect" -g 10 -s science --no-rerank
-    python scripts/test_retriever.py -q "what is electrostatics" -g 12 -s science --json out.json
+    python scripts/test_retriever.py -q "what is electrostatics" -g 12 -s physics --json out.json
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from rag.config import ConfigError, load_config  # noqa: E402
+from rag.curriculum_catalog import subjects_for_grade, validate_scope  # noqa: E402
 from rag.logging_utils import setup_logging  # noqa: E402
 from rag.neo4j_store import Neo4jStore, Neo4jUnavailableError  # noqa: E402
 from rag.pipeline import HybridRetriever  # noqa: E402
@@ -95,6 +96,8 @@ def print_report(response: RetrievalResponse, *, limit: int) -> None:
     print()
     print("#" * 132)
     print(f"QUERY : {response.query}")
+    if diagnostics.retrieval_query and diagnostics.retrieval_query != response.query:
+        print(f"REWRITE: {diagnostics.retrieval_query} (intent={diagnostics.rewrite_intent})")
     print(f"SCOPE : {response.scope.describe()}")
     print("#" * 132)
 
@@ -137,11 +140,8 @@ def print_report(response: RetrievalResponse, *, limit: int) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-q", "--query", help="Student question. Omit to be prompted.")
-    parser.add_argument("-g", "--grade", type=int, help="Grade filter, e.g. 3")
-    parser.add_argument("-s", "--subject", help="Subject filter: science | mathematics")
-    parser.add_argument("-u", "--unit", help="Unit id filter")
-    parser.add_argument("--resource-type", help="Resource type filter")
-    parser.add_argument("--audience", help="student | teacher | other")
+    parser.add_argument("-g", "--grade", type=int, help="Student class, 1–12 (required)")
+    parser.add_argument("-s", "--subject", help="Subject for that class (required)")
     parser.add_argument(
         "--limit", type=int, default=8, help="Rows shown per channel (default 8)"
     )
@@ -175,16 +175,23 @@ def main() -> int:
         try:
             query = input("Question: ").strip()
             if grade is None:
-                raw_grade = input("Grade (blank for any): ").strip()
+                raw_grade = input("Grade (1–12): ").strip()
                 grade = int(raw_grade) if raw_grade else None
             if subject is None:
-                raw_subject = input("Subject (science/mathematics, blank for any): ").strip()
+                allowed = subjects_for_grade(grade) if grade else ()
+                hint = "/".join(allowed) if allowed else "set grade first"
+                raw_subject = input(f"Subject ({hint}): ").strip()
                 subject = raw_subject or None
         except (EOFError, KeyboardInterrupt):
             print("\nAborted.")
             return 1
     if not query:
         print("No query given.", file=sys.stderr)
+        return 2
+    try:
+        grade, subject = validate_scope(grade, subject)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
     try:
@@ -201,9 +208,6 @@ def main() -> int:
             query,
             grade=grade,
             subject=subject,
-            unit=args.unit,
-            resource_type=args.resource_type,
-            audience=args.audience,
             rerank=not args.no_rerank,
             final_top_k=args.final_top_k,
             include_images=True if args.images else None,

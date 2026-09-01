@@ -303,6 +303,16 @@ def _save_pixmap_as_png(
         pixmap = None
 
 
+def _xref_is_cmyk(doc: pymupdf.Document, xref: int) -> bool:
+    pixmap = pymupdf.Pixmap(doc, xref)
+    try:
+        return pixmap.colorspace is not None and pixmap.colorspace.n == 4
+    except Exception:
+        return False
+    finally:
+        pixmap = None
+
+
 def _save_embedded_image(
     doc: pymupdf.Document,
     xref: int,
@@ -336,6 +346,21 @@ def _save_embedded_image(
             f"unsupported format {image_format!r}"
         )
         return None
+
+    # Browsers (and Qwen-VL) cannot display JPEG2000/TIFF; CMYK JPEG renders black.
+    convert = image_format in {"jpx", "jp2", "j2k", "tiff", "tif"}
+    if not convert and image_format in {"jpeg", "jpg"}:
+        convert = _xref_is_cmyk(doc, xref)
+    if convert:
+        png_path = _image_output_path(images_root, metadata, page_number, xref, "png")
+        try:
+            if _save_pixmap_as_png(doc, xref, png_path):
+                return png_path, "png"
+        except Exception as render_error:
+            warnings.append(
+                f"image xref {xref} on page {page_number}: "
+                f"could not convert {image_format} to PNG ({render_error})"
+            )
 
     local_path = _image_output_path(
         images_root, metadata, page_number, xref, image_format

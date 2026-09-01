@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Download the retrieval models (BGE-M3 embedder, BGE reranker) into models/.
+"""Download retrieval-stage models into models/.
 
-Only downloads what is missing. The generator model (Qwen3-VL-8B-Instruct) is
-never touched by this script.
+Fetches BGE-M3, the BGE reranker, SigLIP (textbook figure matching), and the
+Qwen3-VL-2B query rewriter. Only downloads what is missing. The 8B tutor is
+downloaded by ``scripts/download_qwen_models.py`` (which also fetches this 2B
+rewriter).
 
     python scripts/download_retrieval_models.py
     python scripts/download_retrieval_models.py --force
     python scripts/download_retrieval_models.py --model bge-m3
+    python scripts/download_retrieval_models.py --model siglip-base-patch16-224
+    python scripts/download_retrieval_models.py --model qwen3-vl-2b-instruct
 """
 
 from __future__ import annotations
@@ -51,13 +55,42 @@ MODELS: tuple[ModelSpec, ...] = (
         required_files=("config.json", "tokenizer.json", "model.safetensors"),
         ignore_patterns=("assets/*", "*.png", "*.DS_Store"),
     ),
+    ModelSpec(
+        key="qwen3-vl-2b-instruct",
+        repo_id="Qwen/Qwen3-VL-2B-Instruct",
+        local_dir=PROJECT_ROOT / "models" / "qwen3-vl-2b-instruct",
+        required_files=("config.json", "tokenizer.json"),
+        ignore_patterns=("*.png", "*.jpg", "*.webp", "*.DS_Store"),
+    ),
+    ModelSpec(
+        key="siglip-base-patch16-224",
+        repo_id="google/siglip-base-patch16-224",
+        local_dir=PROJECT_ROOT / "models" / "siglip-base-patch16-224",
+        required_files=("config.json",),
+        ignore_patterns=("*.png", "*.jpg", "*.webp", "*.DS_Store"),
+    ),
 )
 
 
 def is_present(spec: ModelSpec) -> bool:
-    return spec.local_dir.is_dir() and all(
-        (spec.local_dir / name).is_file() for name in spec.required_files
-    )
+    if not spec.local_dir.is_dir():
+        return False
+    if not all((spec.local_dir / name).is_file() for name in spec.required_files):
+        return False
+    # SigLIP may ship as a single safetensors file.
+    if spec.key.startswith("siglip"):
+        return (
+            (spec.local_dir / "model.safetensors").is_file()
+            or (spec.local_dir / "pytorch_model.bin").is_file()
+            or (spec.local_dir / "model.safetensors.index.json").is_file()
+        )
+    # Qwen VL checkpoints may be a single safetensors file or an index + shards.
+    if spec.key.startswith("qwen"):
+        return (
+            (spec.local_dir / "model.safetensors").is_file()
+            or (spec.local_dir / "model.safetensors.index.json").is_file()
+        )
+    return True
 
 
 def directory_size_mb(path: Path) -> float:
@@ -138,7 +171,7 @@ def main() -> int:
     print("-" * 60)
     for spec in selected:
         state = "OK" if results[spec.repo_id] else "FAILED"
-        print(f"  {state:7s} {spec.repo_id:26s} -> {spec.local_dir}")
+        print(f"  {state:7s} {spec.repo_id:32s} -> {spec.local_dir}")
 
     return 0 if all(results.values()) else 1
 

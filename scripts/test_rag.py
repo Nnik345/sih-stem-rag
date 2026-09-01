@@ -7,7 +7,7 @@ skipped entirely (--strict) or asked to decline rather than invent an answer.
 
     python scripts/test_rag.py -q "what are the components of food" -g 6 -s science
     python scripts/test_rag.py -q "how does light reflect" -g 10 -s science --strict
-    python scripts/test_rag.py -q "what is electrostatics" -g 12 -s science --retrieval-only
+    python scripts/test_rag.py -q "what is electrostatics" -g 12 -s physics --retrieval-only
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from rag.config import ConfigError, load_config  # noqa: E402
+from rag.curriculum_catalog import subjects_for_grade, validate_scope  # noqa: E402
 from rag.generator import GeneratorError  # noqa: E402
 from rag.logging_utils import setup_logging  # noqa: E402
 from rag.neo4j_store import Neo4jStore, Neo4jUnavailableError  # noqa: E402
@@ -39,6 +40,8 @@ def print_diagnostics(result: RagResult) -> None:
     print("RETRIEVAL DIAGNOSTICS")
     print(RULE)
     print(f"  query            : {result.query}")
+    if diagnostics.retrieval_query:
+        print(f"  retrieval query  : {diagnostics.retrieval_query}")
     print(f"  scope            : {result.scope.describe()}")
     print(f"  candidate counts : {diagnostics.channel_counts()}")
     print(
@@ -119,13 +122,16 @@ def print_provenance(result: RagResult) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-q", "--query", help="Student question. Omit to be prompted.")
-    parser.add_argument("-g", "--grade", type=int, help="Student grade, e.g. 3")
-    parser.add_argument("-s", "--subject", help="science | mathematics")
-    parser.add_argument("-u", "--unit", help="Restrict to a unit id")
+    parser.add_argument(
+        "--image",
+        help="Optional student photo (not ingested). Query may be omitted when set.",
+    )
+    parser.add_argument("-g", "--grade", type=int, help="Student class, 1–12 (required)")
+    parser.add_argument("-s", "--subject", help="Subject for that class (required)")
     parser.add_argument(
         "--state",
         choices=[s.value for s in TutorState if s is not TutorState.INSUFFICIENT_EVIDENCE],
-        help="Request a specific tutoring move (default ASK_QUESTION).",
+        help="Request a specific tutoring move (default GIVE_HINT).",
     )
     parser.add_argument(
         "--retrieval-only",
@@ -153,20 +159,31 @@ def main() -> int:
         return 2
 
     query, grade, subject = args.query, args.grade, args.subject
-    if not query:
+    image_path = Path(args.image).expanduser() if args.image else None
+    if image_path is not None and not image_path.is_file():
+        print(f"ERROR: image not found: {image_path}", file=sys.stderr)
+        return 2
+    if not query and image_path is None:
         try:
             query = input("Student question: ").strip()
             if grade is None:
-                raw = input("Grade (blank for any): ").strip()
+                raw = input("Grade (1–12): ").strip()
                 grade = int(raw) if raw else None
             if subject is None:
-                raw = input("Subject (science/mathematics, blank for any): ").strip()
+                allowed = subjects_for_grade(grade) if grade else ()
+                hint = "/".join(allowed) if allowed else "set grade first"
+                raw = input(f"Subject ({hint}): ").strip()
                 subject = raw or None
         except (EOFError, KeyboardInterrupt):
             print("\nAborted.")
             return 1
-    if not query:
-        print("No question given.", file=sys.stderr)
+    if not query and image_path is None:
+        print("No question given. Pass -q or --image.", file=sys.stderr)
+        return 2
+    try:
+        grade, subject = validate_scope(grade, subject)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
     if args.max_new_tokens:
@@ -190,11 +207,11 @@ def main() -> int:
 
         # Stage 1: retrieval + evidence gate. The generator is untouched here.
         result = pipeline.prepare(
-            query,
+            query or "",
             grade=grade,
             subject=subject,
-            unit=args.unit,
             requested_state=TutorState(args.state) if args.state else None,
+            image_path=image_path,
         )
         print_diagnostics(result)
         print_provenance(result)

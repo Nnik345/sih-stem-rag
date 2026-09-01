@@ -72,6 +72,16 @@ def main() -> int:
     parser.add_argument(
         "--yes", action="store_true", help="Skip the --reset confirmation prompt."
     )
+    parser.add_argument(
+        "--parse-workers",
+        type=int,
+        default=None,
+        help=(
+            "CPU processes used only for PDF parse (default: min(CPU count, 8)). "
+            "Chunking, Neo4j writes and BGE-M3 stay on the main process. "
+            "Pass 1 to parse sequentially."
+        ),
+    )
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
 
@@ -132,6 +142,7 @@ def main() -> int:
                 limit=args.limit,
                 skip_embeddings=args.skip_embeddings,
                 force=args.force,
+                parse_workers=args.parse_workers,
             )
         except KeyboardInterrupt:
             print(

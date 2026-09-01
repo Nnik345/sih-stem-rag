@@ -36,11 +36,23 @@ export default function App() {
     setSelected(null);
     setTrace(null);
     try {
-      const response = await fetch("/api/runs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formToPayload(form)),
-      });
+      const payload = formToPayload(form);
+      const init: RequestInit = { method: "POST" };
+      if (form.imageFile) {
+        const body = new FormData();
+        body.append("query", String(payload.query ?? ""));
+        body.append("grade", String(payload.grade));
+        body.append("subject", String(payload.subject));
+        if (payload.tutor_state) body.append("tutor_state", String(payload.tutor_state));
+        body.append("retrieval_only", payload.retrieval_only ? "true" : "false");
+        body.append("strict", payload.strict ? "true" : "false");
+        body.append("image", form.imageFile);
+        init.body = body;
+      } else {
+        init.headers = { "Content-Type": "application/json" };
+        init.body = JSON.stringify(payload);
+      }
+      const response = await fetch("/api/runs", init);
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         setErrors({ query: String(body.detail ?? "Could not start run.") });
@@ -60,6 +72,10 @@ export default function App() {
       const named = [
         "run_started",
         "filters_applied",
+        "rewrite_started",
+        "rewrite_completed",
+        "image_started",
+        "image_completed",
         "dense_started",
         "dense_completed",
         "lexical_started",

@@ -72,6 +72,8 @@ class StageStatus(str, Enum):
 STAGE_ORDER = (
     "query",
     "filters",
+    "rewrite",
+    "image",
     "dense",
     "lexical",
     "graph",
@@ -85,6 +87,10 @@ STAGE_ORDER = (
 PIPELINE_EVENTS = (
     "run_started",
     "filters_applied",
+    "rewrite_started",
+    "rewrite_completed",
+    "image_started",
+    "image_completed",
     "dense_started",
     "dense_completed",
     "lexical_started",
@@ -106,6 +112,10 @@ PIPELINE_EVENTS = (
 EVENT_TO_STAGE = {
     "run_started": "query",
     "filters_applied": "filters",
+    "rewrite_started": "rewrite",
+    "rewrite_completed": "rewrite",
+    "image_started": "image",
+    "image_completed": "image",
     "dense_started": "dense",
     "dense_completed": "dense",
     "lexical_started": "lexical",
@@ -233,6 +243,7 @@ class FusionTrace:
     weight_dense: float = 1.0
     weight_fulltext: float = 1.0
     weight_graph: float = 0.5
+    weight_image: float = 1.0
     formula: str = "score(chunk) = Σ weight_c / (k + rank_c)"
     candidates: list[FusionCandidateTrace] = field(default_factory=list)
 
@@ -242,6 +253,7 @@ class FusionTrace:
             "weight_dense": self.weight_dense,
             "weight_fulltext": self.weight_fulltext,
             "weight_graph": self.weight_graph,
+            "weight_image": self.weight_image,
             "formula": self.formula,
             "candidates": [c.to_dict() for c in self.candidates],
         }
@@ -293,6 +305,7 @@ class EvidenceTrace:
     checks: list[EvidenceCheckTrace] = field(default_factory=list)
     kept_chunk_ids: list[str] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
+    attached_figures: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -301,6 +314,7 @@ class EvidenceTrace:
             "checks": [c.to_dict() for c in self.checks],
             "kept_chunk_ids": self.kept_chunk_ids,
             "reasons": self.reasons,
+            "attached_figures": list(self.attached_figures),
         }
 
 
@@ -363,6 +377,9 @@ class RunTrace:
     evidence: EvidenceTrace | None = None
     prompt: PromptTrace | None = None
     generation: GenerationTrace | None = None
+    rewrite: dict[str, Any] | None = None
+    image: dict[str, Any] | None = None
+    attached_figures: list[dict[str, Any]] = field(default_factory=list)
     diagnostics: dict[str, Any] = field(default_factory=dict)
     events: list[str] = field(default_factory=list)
 
@@ -391,6 +408,9 @@ class RunTrace:
             "evidence": self.evidence.to_dict() if self.evidence else None,
             "prompt": self.prompt.to_dict() if self.prompt else None,
             "generation": self.generation.to_dict() if self.generation else None,
+            "rewrite": self.rewrite,
+            "image": self.image,
+            "attached_figures": list(self.attached_figures),
             "diagnostics": self.diagnostics,
             "events": list(self.events),
         }
@@ -459,6 +479,32 @@ class RunTraceCollector:
             stage.data = data
             return
 
+        if event == "rewrite_completed":
+            self.trace.rewrite = {
+                "original_query": data.get("original_query", self.trace.query),
+                "retrieval_query": data.get("retrieval_query", ""),
+                "intent": data.get("intent"),
+                "input_kind": data.get("input_kind", "other"),
+                "transcribed_question": data.get("transcribed_question", ""),
+                "fallback": bool(data.get("fallback")),
+                "reason": data.get("reason", ""),
+            }
+            self._complete_stage("rewrite", data)
+            return
+
+        if event == "image_completed":
+            self.trace.image = {
+                "hits": data.get("image_hits", []),
+                "skipped": bool(data.get("skipped")),
+            }
+            if data.get("skipped"):
+                self.trace.stages["image"].status = StageStatus.SKIPPED
+                self.trace.stages["image"].summary = data.get("summary", "skipped")
+                self.trace.stages["image"].elapsed_ms = data.get("elapsed_ms")
+                return
+            self._complete_stage("image", data)
+            return
+
         if event == "dense_completed":
             raw = payload.get("dense")
             if isinstance(raw, DenseTrace):
@@ -508,6 +554,10 @@ class RunTraceCollector:
             self.trace.evidence = raw if isinstance(raw, EvidenceTrace) else _evidence_from_dict(
                 data.get("evidence", data)
             )
+            figures = data.get("attached_figures") or []
+            self.trace.attached_figures = list(figures)
+            if self.trace.evidence is not None:
+                self.trace.evidence.attached_figures = list(figures)
             self._complete_stage("evidence", data)
             return
 
@@ -696,6 +746,7 @@ def _fusion_from_dict(data: dict[str, Any]) -> FusionTrace:
         weight_dense=float(data.get("weight_dense", 1.0)),
         weight_fulltext=float(data.get("weight_fulltext", 1.0)),
         weight_graph=float(data.get("weight_graph", 0.5)),
+        weight_image=float(data.get("weight_image", 1.0)),
         formula=data.get("formula", FusionTrace.formula),
         candidates=[FusionCandidateTrace(**c) if isinstance(c, dict) else c for c in data.get("candidates") or []],
     )
@@ -718,6 +769,7 @@ def _evidence_from_dict(data: dict[str, Any]) -> EvidenceTrace:
         checks=[EvidenceCheckTrace(**c) if isinstance(c, dict) else c for c in data.get("checks") or []],
         kept_chunk_ids=list(data.get("kept_chunk_ids") or []),
         reasons=list(data.get("reasons") or []),
+        attached_figures=list(data.get("attached_figures") or []),
     )
 
 

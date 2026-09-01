@@ -25,6 +25,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 # Bumping this string invalidates cached embeddings and lets future experiments
 # keep several embedding generations side by side in the same graph.
 EMBEDDING_VERSION = "bge-m3-dense-v1"
+IMAGE_EMBEDDING_VERSION = "siglip-base-patch16-224-v1"
 
 
 class ConfigError(RuntimeError):
@@ -157,6 +158,11 @@ class RetrievalConfig:
     weight_fulltext: float = 1.0
     # Graph expansion is a secondary signal.
     weight_graph: float = 0.5
+    # SigLIP kNN over textbook Image nodes (student photos are queries only).
+    image_top_k: int = 8
+    min_image_score: float = 0.25
+    weight_image: float = 1.0
+    max_attached_figures: int = 2
 
     @classmethod
     def from_env(cls) -> "RetrievalConfig":
@@ -172,6 +178,10 @@ class RetrievalConfig:
             weight_dense=_env_float("WEIGHT_DENSE", 1.0),
             weight_fulltext=_env_float("WEIGHT_FULLTEXT", 1.0),
             weight_graph=_env_float("WEIGHT_GRAPH", 0.5),
+            image_top_k=_env_int("IMAGE_TOP_K", 8),
+            min_image_score=_env_float("IMAGE_MIN_SCORE", 0.25),
+            weight_image=_env_float("WEIGHT_IMAGE", 1.0),
+            max_attached_figures=_env_int("MAX_ATTACHED_FIGURES", 2),
         )
         if not 1 <= cfg.graph_max_depth <= 3:
             raise ConfigError(
@@ -185,6 +195,8 @@ class RetrievalConfig:
             ("FULLTEXT_TOP_K", cfg.fulltext_top_k),
             ("FUSION_TOP_K", cfg.fusion_top_k),
             ("FINAL_TOP_K", cfg.final_top_k),
+            ("IMAGE_TOP_K", cfg.image_top_k),
+            ("MAX_ATTACHED_FIGURES", cfg.max_attached_figures),
         ):
             if k <= 0:
                 raise ConfigError(f"{name} must be positive, got {k}")
@@ -210,6 +222,9 @@ class EvidenceConfig:
     require_scope_match: bool = True
     # Fraction of the query's content words that must appear in the evidence.
     min_query_term_overlap: float = 0.15
+    # Prior-grade (lookback) chunks must clear this reranker logit. Higher than
+    # min_rerank_score so weak older-chapter near-misses stay out.
+    min_prior_grade_rerank_score: float = 1.0
 
     @classmethod
     def from_env(cls) -> "EvidenceConfig":
@@ -219,6 +234,9 @@ class EvidenceConfig:
             min_strong_chunks=_env_int("EVIDENCE_MIN_STRONG_CHUNKS", 1),
             require_scope_match=_env_bool("EVIDENCE_REQUIRE_SCOPE_MATCH", True),
             min_query_term_overlap=_env_float("EVIDENCE_MIN_QUERY_TERM_OVERLAP", 0.15),
+            min_prior_grade_rerank_score=_env_float(
+                "EVIDENCE_MIN_PRIOR_GRADE_RERANK_SCORE", 1.0
+            ),
         )
 
 
@@ -232,7 +250,9 @@ class ModelConfig:
 
     embedding_model_path: Path
     reranker_model_path: Path
+    rewriter_model_path: Path
     generator_model_path: Path
+    image_embedding_model_path: Path
 
     embedding_device: str = "auto"
     embedding_batch_size: int = 8
@@ -246,10 +266,17 @@ class ModelConfig:
 
     generator_max_new_tokens: int = 640
     generator_temperature: float = 0.7
-    # Memory held back from the generator's weights for activations and the KV
-    # cache. device_map="auto" otherwise fills the device with layers and leaves
-    # nothing for generation, which OOMs partway through a long answer.
-    generator_vram_reserve_gib: float = 3.0
+    # Floor on VRAM held back from generator weights for vision prefill and the
+    # KV cache. Actual headroom also scales with the card (see model_memory).
+    # Set to 0 to disable the cap (device_map packs the GPU; generation may OOM).
+    generator_vram_reserve_gib: float = 5.5
+    # Extra headroom as a fraction of *total* device memory. On a 32 GiB card
+    # this leaves the 8B tutor on GPU; on 8 GiB more layers go to system RAM.
+    generator_vram_headroom_fraction: float = 0.25
+    # Fraction of physical RAM Accelerate may use for CPU-offloaded layers.
+    generator_cpu_ram_fraction: float = 0.80
+    # 0 = choose Qwen-VL max_pixels from VRAM size. >0 forces that pixel budget.
+    generator_max_image_pixels: int = 0
     # Per-chunk character budget for the evidence block. Transformers computes
     # fp32 logits over every prompt position during prefill, so prompt length
     # costs memory quadratically in practice; trimming here is the cheapest lever.
@@ -257,13 +284,36 @@ class ModelConfig:
 
     @classmethod
     def from_env(cls) -> "ModelConfig":
+        reserve = _env_float("GENERATOR_VRAM_RESERVE_GIB", 5.5)
+        headroom = _env_float("GENERATOR_VRAM_HEADROOM_FRACTION", 0.25)
+        cpu_frac = _env_float("GENERATOR_CPU_RAM_FRACTION", 0.80)
+        if reserve < 0:
+            raise ConfigError(
+                f"GENERATOR_VRAM_RESERVE_GIB must be >= 0, got {reserve}"
+            )
+        if not 0 < headroom < 0.9:
+            raise ConfigError(
+                "GENERATOR_VRAM_HEADROOM_FRACTION must be between 0 and 0.9, "
+                f"got {headroom}"
+            )
+        if not 0.1 <= cpu_frac <= 0.95:
+            raise ConfigError(
+                "GENERATOR_CPU_RAM_FRACTION must be between 0.1 and 0.95, "
+                f"got {cpu_frac}"
+            )
         return cls(
             embedding_model_path=_env_path("EMBEDDING_MODEL_PATH", "models/bge-m3"),
             reranker_model_path=_env_path(
                 "RERANKER_MODEL_PATH", "models/bge-reranker-v2-m3"
             ),
+            rewriter_model_path=_env_path(
+                "REWRITER_MODEL_PATH", "models/qwen3-vl-2b-instruct"
+            ),
             generator_model_path=_env_path(
                 "GENERATOR_MODEL_PATH", "models/qwen3-vl-8b-instruct"
+            ),
+            image_embedding_model_path=_env_path(
+                "IMAGE_EMBEDDING_MODEL_PATH", "models/siglip-base-patch16-224"
             ),
             embedding_device=_env_str("EMBEDDING_DEVICE", "auto"),
             embedding_batch_size=_env_int("EMBEDDING_BATCH_SIZE", 8),
@@ -274,7 +324,10 @@ class ModelConfig:
             reranker_max_length=_env_int("RERANKER_MAX_LENGTH", 1024),
             generator_max_new_tokens=_env_int("GENERATOR_MAX_NEW_TOKENS", 640),
             generator_temperature=_env_float("GENERATOR_TEMPERATURE", 0.7),
-            generator_vram_reserve_gib=_env_float("GENERATOR_VRAM_RESERVE_GIB", 3.0),
+            generator_vram_reserve_gib=reserve,
+            generator_vram_headroom_fraction=headroom,
+            generator_cpu_ram_fraction=cpu_frac,
+            generator_max_image_pixels=_env_int("GENERATOR_MAX_IMAGE_PIXELS", 0),
             generator_max_evidence_chars=_env_int(
                 "GENERATOR_MAX_EVIDENCE_CHARS", 1000
             ),
@@ -314,6 +367,11 @@ class PathConfig:
         return self.processed_data_path / "cache"
 
     @property
+    def uploads_dir(self) -> Path:
+        """Temporary student photos. Never ingested as Image nodes."""
+        return self.processed_data_path / "uploads"
+
+    @property
     def evaluation_dir(self) -> Path:
         return PROJECT_ROOT / "data" / "evaluation"
 
@@ -324,6 +382,7 @@ class PathConfig:
             self.images_dir,
             self.manifests_dir,
             self.cache_dir,
+            self.uploads_dir,
         ):
             directory.mkdir(parents=True, exist_ok=True)
 
@@ -371,9 +430,9 @@ class RagConfig:
     ingest: IngestConfig
 
     embedding_version: str = EMBEDDING_VERSION
-    # Images are always ingested and linked in the graph; this flag only controls
-    # whether retrieval surfaces them. Visual embeddings are not implemented.
-    multimodal_enabled: bool = False
+    image_embedding_version: str = IMAGE_EMBEDDING_VERSION
+    # Student photos are input-only. Textbook figures are not attached to answers.
+    multimodal_enabled: bool = True
 
     def require_neo4j(self) -> Neo4jConfig:
         if self.neo4j is None:
@@ -395,9 +454,12 @@ class RagConfig:
                 f"  corpus              : {self.paths.corpus_path}",
                 f"  processed data      : {self.paths.processed_data_path}",
                 f"  embedding model     : {self.models.embedding_model_path}",
+                f"  image embedding     : {self.models.image_embedding_model_path}",
                 f"  reranker model      : {self.models.reranker_model_path}",
+                f"  rewriter model      : {self.models.rewriter_model_path}",
                 f"  generator model     : {self.models.generator_model_path}",
                 f"  embedding version   : {self.embedding_version}",
+                f"  image embed version : {self.image_embedding_version}",
                 f"  neo4j               : {neo4j}",
                 f"  chunk target/overlap: {self.chunking.target_tokens}"
                 f"/{self.chunking.overlap_tokens} tokens",
@@ -408,7 +470,8 @@ class RagConfig:
                 f"  rrf k / weights     : {self.retrieval.rrf_k} / "
                 f"dense={self.retrieval.weight_dense} "
                 f"fulltext={self.retrieval.weight_fulltext} "
-                f"graph={self.retrieval.weight_graph}",
+                f"graph={self.retrieval.weight_graph} "
+                f"image={self.retrieval.weight_image}",
                 f"  graph max depth     : {self.retrieval.graph_max_depth}",
                 f"  multimodal retrieval: "
                 f"{'enabled' if self.multimodal_enabled else 'disabled'}",
@@ -469,5 +532,8 @@ def load_config(*, require_neo4j: bool = True) -> RagConfig:
         evidence=EvidenceConfig.from_env(),
         models=ModelConfig.from_env(),
         ingest=IngestConfig.from_env(),
-        multimodal_enabled=_env_bool("MULTIMODAL_ENABLED", False),
+        multimodal_enabled=_env_bool("MULTIMODAL_ENABLED", True),
+        image_embedding_version=_env_str(
+            "IMAGE_EMBEDDING_VERSION", IMAGE_EMBEDDING_VERSION
+        ),
     )

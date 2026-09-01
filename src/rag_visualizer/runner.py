@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from rag.generator import GenerationSettings
@@ -57,26 +58,30 @@ def _generation_settings(raw: dict[str, Any] | None) -> GenerationSettings | Non
 
 def execute_run(pipeline: PipelineLike, request: dict[str, Any], observer: FanoutObserver) -> None:
     """Blocking RAG execution. Called from a worker thread."""
+    image_path = request.get("image_path")
     try:
         pipeline.answer(
-            request["query"],
+            request.get("query") or "",
             grade=request.get("grade"),
             subject=request.get("subject"),
-            unit=request.get("unit"),
-            resource_type=request.get("resource_type"),
-            audience=request.get("audience"),
-            document_id=request.get("document_id"),
             requested_state=_tutor_state(request.get("tutor_state")),
             generate_on_insufficient_evidence=not bool(request.get("strict")),
             retrieval_only=bool(request.get("retrieval_only")),
             settings=_generation_settings(request.get("generation")),
             observer=observer,
+            image_path=image_path,
         )
     except Exception as exc:
         observer.on_event(
             "run_failed",
             {"error": redact_secrets(safe_error_message(exc)), "stage": "generator"},
         )
+    finally:
+        if image_path:
+            try:
+                Path(image_path).unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def default_pipeline_factory() -> SocraticRagPipeline:

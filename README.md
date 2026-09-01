@@ -71,8 +71,7 @@ python scripts/download_curriculum.py
 
 ```bash
 python scripts/download_retrieval_models.py
-huggingface-cli download Qwen/Qwen3-VL-8B-Instruct \
-    --local-dir models/qwen3-vl-8b-instruct
+python scripts/download_qwen_models.py
 ```
 
 ### 5. Neo4j (tarball under `.neo4j-local/` only)
@@ -142,7 +141,7 @@ python scripts/test_rag.py \
 
 python scripts/test_rag.py \
     --query "what is electrostatics" \
-    --grade 12 --subject science --retrieval-only
+    --grade 12 --subject physics --retrieval-only
 ```
 
 ### 9. Tests
@@ -192,25 +191,28 @@ python scripts/download_curriculum.py
 
 Output: `curriculum/raw/ncert/` (git-ignored). Details in [Dataset](#dataset).
 
-### 4. Retrieval models (~4.6 GB total)
+### 4. Retrieval models (BGE + 2B rewriter)
 
 ```bash
 python scripts/download_retrieval_models.py
 ```
 
-Output: `models/bge-m3/` (~2.3 GB) and `models/bge-reranker-v2-m3/` (~2.3 GB).
-If a model is already complete locally, the download script skips it and prints a
-status table. Use `--force` to re-download. Details in [Models](#models).
+Output: `models/bge-m3/` (~2.3 GB), `models/bge-reranker-v2-m3/` (~2.3 GB),
+`models/siglip-base-patch16-224/` (figure matching), and
+`models/qwen3-vl-2b-instruct/` (query rewriter, ~4 GB). If a model is already
+complete locally, the download script skips it and prints a status table. Use
+`--force` to re-download. Details in [Models](#models).
 
-### 5. Generator model (~17 GB)
+### 5. Qwen models (2B rewriter + 8B tutor)
 
 ```bash
-huggingface-cli download Qwen/Qwen3-VL-8B-Instruct \
-    --local-dir models/qwen3-vl-8b-instruct
+python scripts/download_qwen_models.py
 ```
 
-Output: `models/qwen3-vl-8b-instruct/` (git-ignored). This script is **not** run
-by `download_retrieval_models.py`.
+Output: `models/qwen3-vl-2b-instruct/` and `models/qwen3-vl-8b-instruct/`
+(git-ignored). The 2B rewriter is also fetched by `download_retrieval_models.py`;
+already-complete directories are skipped. The 8B tutor is **not** fetched by the
+retrieval script.
 
 ### 6. Neo4j + JDK 21
 
@@ -242,6 +244,7 @@ git-ignored and **safe to delete after extraction** to save disk.
 ```bash
 python scripts/init_neo4j.py
 python scripts/ingest_corpus.py    # ~8 minutes for 25 catalog files
+python scripts/embed_images.py     # SigLIP over existing Image nodes
 ```
 
 Ingestion writes git-ignored artefacts under `data/processed/` (images,
@@ -276,7 +279,9 @@ or use the table below to restore individual pieces.
 | `curriculum/raw/` | `python scripts/download_curriculum.py` (official NCERT zips) | several hundred MB |
 | `models/bge-m3/` | `python scripts/download_retrieval_models.py` | ~2.3 GB |
 | `models/bge-reranker-v2-m3/` | same script | ~2.3 GB |
-| `models/qwen3-vl-8b-instruct/` | `huggingface-cli download Qwen/Qwen3-VL-8B-Instruct --local-dir models/qwen3-vl-8b-instruct` | ~17 GB |
+| `models/qwen3-vl-2b-instruct/` | `python scripts/download_retrieval_models.py` or `python scripts/download_qwen_models.py` | ~4 GB |
+| `models/siglip-base-patch16-224/` | `python scripts/download_retrieval_models.py --model siglip-base-patch16-224` | ~400 MB |
+| `models/qwen3-vl-8b-instruct/` | `python scripts/download_qwen_models.py` | ~17 GB |
 | `.neo4j-local/` | [Neo4j setup](#neo4j-setup): download Neo4j + JDK tarballs, extract, then `./scripts/neo4j_local.sh set-password` and `start` | ~500 MB install + DB grows with ingest |
 | `.neo4j-local/*.tar.gz` | re-download the Neo4j/JDK tarballs from the URLs in [Neo4j setup](#neo4j-setup) | ~330 MB |
 | `curriculum/processed/` | `python scripts/ingest_corpus.py` | grows with ingest |
@@ -313,12 +318,17 @@ Approved STEM sources (PDF/ePUB)
         |
    Student query
         |
-   Metadata filtering          (grade / subject / unit, supplied by the caller)
+   Metadata filtering          (grade + subject, required from the caller)
         |
-   Three retrieval channels
+   Qwen3-VL-2B query rewrite   (text and optional student photo; then unloaded)
+        |
+   SigLIP image kNN            (if a photo was uploaded; then unloaded)
+        |
+   Retrieval channels
         |-- dense semantic retrieval
         |-- lexical / full-text retrieval
-        +-- bounded graph expansion
+        |-- bounded graph expansion
+        +-- page chunks from matched textbook figures
         |
    Weighted Reciprocal Rank Fusion
         |
@@ -353,18 +363,19 @@ textbooks that implement the **CBSE** curriculum. NCERT is both the ingested
 source and the alignment authority (`source_id = ncert_textbook`). There is no
 separate CBSE syllabus PDF and no CISCE layer.
 
-Physics, Chemistry, Biology and primary EVS ingest as `science`, with
-`unit_slug` naming the book (for example `physics_part_1`).
+Physics, Chemistry and Biology at classes 11–12 ingest as those subjects
+(`physics`, `chemistry`, `biology`), not as a single `science` bucket. Classes
+3–10 science (including primary EVS) stay `science`.
 
 | Classes | Mathematics | Science |
 | ------: | ----------- | ------- |
 | 1–2 | Joyful Mathematics | — |
-| 3–5 | Maths Mela | Our Wondrous World (EVS) |
+| 3–5 | Maths Mela | Our Wondrous World (EVS) as `science` |
 | 6 | Ganita Prakash | Curiosity |
 | 7–8 | Ganita Prakash (parts) | Curiosity |
 | 9 | Ganita Manjari | Exploration |
 | 10 | Mathematics | Science |
-| 11–12 | Mathematics (parts) | Physics, Chemistry, Biology (parts) |
+| 11–12 | Mathematics (parts) | Physics, Chemistry, Biology as separate subjects |
 
 Hindi/Urdu editions, Exemplar Problems, Lab Manuals, covers, and **Answers**
 PDFs are not ingested. Unsolved `Exercises` / `Let’s practise` sections are
@@ -422,30 +433,61 @@ larger than the old 25-document corpus and may take hours.
 
 ## Models
 
-All three models are stored locally and none are committed to the repository.
+All five models are stored locally and none are committed to the repository.
 
 | Role | Model | Local path |
 |------|-------|------------|
+| Query rewriter | [Qwen/Qwen3-VL-2B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct) | `models/qwen3-vl-2b-instruct` |
 | Generator | [Qwen/Qwen3-VL-8B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct) (original, non-quantized) | `models/qwen3-vl-8b-instruct` |
 | Embeddings | [BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3) | `models/bge-m3` |
 | Reranker | [BAAI/bge-reranker-v2-m3](https://huggingface.co/BAAI/bge-reranker-v2-m3) | `models/bge-reranker-v2-m3` |
+| Figure matching | [google/siglip-base-patch16-224](https://huggingface.co/google/siglip-base-patch16-224) | `models/siglip-base-patch16-224` |
+
+### Query rewriter
+
+Qwen3-VL-2B-Instruct rewrites the student's wording into an NCERT-like retrieval
+query, then is unloaded before SigLIP (if a photo was uploaded) and BGE-M3.
+With a photo it also classifies `input_kind` (`math_problem`, `diagram`, or
+`other`) and may transcribe the problem for the tutor. It does not answer the
+question and does not infer grade or subject. Check-my-work questions (for example “is the
+differentiation of x² + 3x = 2x + 3?”) are labelled `verify`: retrieval targets
+the topic / curriculum rule, not the student’s proposed answer or their specific
+polynomial, and does not treat both sides as things to differentiate. For a
+check-my-work item such as “is the differentiation of x² + 3x = 2x + 3?”, the
+retrieval query names the power rule and sum rule rather than the expression
+itself. The rewritten text is used for dense, lexical, rerank and the
+evidence-gate overlap check; the original question stays in the Socratic user
+prompt. Intent is diagnostic only and does not pick the tutoring state.
+
+Mathematics and science/PCB retrieval treat the selected class as **where the
+student is now**. The same subject lineage may also contribute **high-scoring**
+chunks from earlier classes (physics/chemistry/biology may use class 3–10
+science). Higher classes and the other lineage (maths ↮ science) stay closed.
 
 ### Generator
 
 Qwen3-VL-8B-Instruct is loaded with Hugging Face Transformers using
-`device_map="auto"`. Inference is slow. Streaming generation is supported and
-is used by `scripts/test_rag.py`.
+`device_map="auto"` and a **hardware-aware** weight map. The loader reads free
+VRAM and physical RAM at load time: generation headroom stays on the GPU
+(vision prefill + KV cache), leftover layers go to system RAM (up to
+`GENERATOR_CPU_RAM_FRACTION` of RAM, default 80%). A 32 GiB card can run the 8B
+tutor fully on GPU. A 12 GiB or 8 GiB card offloads more layers and generation
+is slower. Streaming is used by `scripts/test_rag.py` and the dashboard.
+
+The dashboard releases BGE / reranker / SigLIP before the tutor loads. On small
+GPUs the tutor is also unloaded before the next retrieval so the 2B rewriter
+fits; a 32 GiB card can keep the tutor resident.
 
 Transformers is installed from GitHub because Qwen3-VL support was not in a
 tagged release at setup time. **Do not replace that dependency.**
 
-Download the generator once:
+Download both Qwen checkpoints once:
 
 ```bash
-huggingface-cli download Qwen/Qwen3-VL-8B-Instruct --local-dir models/qwen3-vl-8b-instruct
+python scripts/download_qwen_models.py
 ```
 
-Download the retrieval models with:
+Download the retrieval models (BGE-M3, BGE reranker, and the 2B rewriter) with:
 
 ```bash
 python scripts/download_retrieval_models.py
@@ -469,17 +511,18 @@ on the top `fusion_top_k` fused candidates and returns the best `final_top_k`.
 
 ### Model loading
 
-The three models are not all loaded at once. Each is loaded lazily and can be
+The four models are not all loaded at once. Each is loaded lazily and can be
 released:
 
 ```
 ingest: load BGE-M3 -> embed -> release BGE-M3
-query : dense/lexical/graph retrieval uses stored vectors and indexes
-        load reranker -> score -> (optionally) release
-        load Qwen3-VL -> stream response
+query : load Qwen3-VL-2B rewriter -> rewrite -> release rewriter
+        load BGE-M3 -> dense retrieval -> (reranker) -> release embedder/reranker
+        load Qwen3-VL-8B (weights split from live VRAM + RAM) -> stream response
 ```
 
-No quantization is used anywhere.
+No quantization is used anywhere. On a small GPU the 8B tutor is unloaded before
+the next query's rewriter so both fit; a 32 GiB card can keep it loaded.
 
 ## Neo4j setup
 
@@ -681,11 +724,13 @@ is preserved.
 retriever.retrieve("what are the components of food", grade=6, subject="science")
 ```
 
-`grade`, `subject`, `unit`, `resource_type`, `audience` and `document_id` are
-optional filters. **Grade and subject are never inferred from the question text**
-— the application already knows them, and guessing a student's grade would be
-both unreliable and pedagogically wrong. With no filters, the whole corpus is
-searched.
+`grade` and `subject` are required on the dashboard, API and CLI. They are never
+inferred from the question text: the application already knows the student's
+class, and guessing it would be both unreliable and pedagogically wrong.
+`HybridRetriever.retrieve` still accepts optional filters for isolated tests.
+Unit, resource type, audience and document id are not user fields; retrieved
+chunk provenance (unit title, pages) is still passed to the generator in the
+evidence block.
 
 Filters become bound Cypher parameters applied during the index scan.
 
@@ -754,8 +799,11 @@ grounding check later.
 
 The gate currently considers: whether any candidates exist; the top reranker
 score; how many chunks clear a "strong" threshold; whether evidence actually
-comes from the requested grade and subject; and whether the retrieved text
-overlaps the question's content terms.
+comes from the requested grade and subject (or a high-scoring earlier class in
+the same subject lineage); and whether the retrieved text overlaps the
+question's content terms. For mathematics, overlap ignores algebraic instance
+tokens such as `3x` or `plus` so a power-rule passage can support
+`x² + 3x`.
 
 **These thresholds are heuristics and are not validated.**
 They are configurable (`EVIDENCE_*` variables) and are meant to be tuned against
@@ -772,17 +820,17 @@ prompt changes do not touch the retrieval code.
 
 The controller composes the system prompt from the student's grade and subject,
 formats retrieved evidence with its provenance, and supports tutoring states:
-`ASK_QUESTION`, `GIVE_HINT`, `CORRECT_MISCONCEPTION`, `EXPLAIN_CONCEPT`,
-`CONFIRM_STEP` and `INSUFFICIENT_EVIDENCE`. Student state is not modelled across
-turns, but the interface takes a conversation history so it does not assume
-one-shot answers.
+`GIVE_HINT` (default), `EXPLAIN_CONCEPT`, `CONFIRM_ANSWER`, and
+`INSUFFICIENT_EVIDENCE`. Student state is not modelled across turns, but the
+interface takes a conversation history so it does not assume one-shot answers.
 
-The generator is instructed to treat retrieved curriculum as the factual basis,
-not to fabricate curriculum facts, not to reveal the full solution immediately, to
-guide with questions and small steps, to match the student's grade, and to admit
-insufficient evidence rather than guess. Source metadata (document, page, unit,
-chunk) is preserved internally so citations can be surfaced later; no URLs are
-fabricated.
+The generator is instructed to treat retrieved curriculum as the factual basis
+and not to fabricate curriculum facts. `GIVE_HINT` and `CONFIRM_ANSWER` stay
+Socratic (no complete solution, about 180 words). `EXPLAIN_CONCEPT` is the
+exception: science gets a full concept explanation and mathematics gets a fully
+worked solution, still grounded in evidence. Source metadata (document, page,
+unit, chunk) is preserved internally so citations can be surfaced later; no URLs
+are fabricated.
 
 ## Commands
 
@@ -803,15 +851,25 @@ extracts chapter PDFs. Existing valid chapter directories are skipped. See
 ```bash
 python scripts/download_retrieval_models.py
 python scripts/download_retrieval_models.py --model bge-m3
+python scripts/download_retrieval_models.py --model qwen3-vl-2b-instruct
+python scripts/download_retrieval_models.py --model siglip-base-patch16-224
 python scripts/download_retrieval_models.py --force
 ```
 
-Downloads BGE-M3 and BGE-reranker-v2-m3 only if missing. Already-complete
-models are skipped and reported in a status table at the end. Never touches
-Qwen3-VL. Flags: `--model` (`bge-m3` or `bge-reranker-v2-m3`, repeatable),
-`--force` (re-download even when complete).
+Downloads BGE-M3, BGE-reranker-v2-m3, SigLIP, and Qwen3-VL-2B-Instruct only if missing.
+Already-complete models are skipped and reported in a status table at the end.
+Never touches the 8B tutor (use `scripts/download_qwen_models.py` for 8B + 2B).
+Flags: `--model` (`bge-m3`, `bge-reranker-v2-m3`, `siglip-base-patch16-224`, or
+`qwen3-vl-2b-instruct`, repeatable), `--force` (re-download even when complete).
 
-### 3. Start Neo4j
+### 3. Download the Qwen models
+
+```bash
+python scripts/download_qwen_models.py
+python scripts/download_qwen_models.py --model qwen3-vl-2b-instruct
+```
+
+### 4. Start Neo4j
 
 Requires a provisioned `.neo4j-local/` (see [Neo4j setup](#neo4j-setup)).
 
@@ -819,18 +877,18 @@ Requires a provisioned `.neo4j-local/` (see [Neo4j setup](#neo4j-setup)).
 ./scripts/neo4j_local.sh start
 ```
 
-### 4. Initialise the schema
+### 5. Initialise the schema
 
 ```bash
 python scripts/init_neo4j.py
 ```
 
-Creates constraints, property indexes, the vector index (dimension read from
-BGE-M3) and the full-text indexes. Idempotent. Flags: `--show` (report schema and
-counts only), `--reset` (delete all nodes; prompts unless `--yes`), `--drop-indexes`
-(with `--reset`, also drop indexes).
+Creates constraints, property indexes, the chunk vector index (dimension read from
+BGE-M3), the image vector index when SigLIP is present, and the full-text indexes.
+Idempotent. Flags: `--show` (report schema and counts only), `--reset` (delete all
+nodes; prompts unless `--yes`), `--drop-indexes` (with `--reset`, also drop indexes).
 
-### 5. Ingest the corpus
+### 6. Ingest the corpus
 
 ```bash
 python scripts/ingest_corpus.py
@@ -847,10 +905,19 @@ python scripts/ingest_corpus.py --force                       # re-process all
 python scripts/ingest_corpus.py --skip-embeddings             # graph only
 python scripts/ingest_corpus.py --keep-embedder               # leave BGE-M3 loaded
 python scripts/ingest_corpus.py --reset                       # destructive, prompts
+python scripts/ingest_corpus.py --parse-workers 8             # parallel PDF parse
 python scripts/ingest_corpus.py --reset --yes                 # skip prompt
 ```
 
-### 6. Inspect the graph
+Embed textbook `Image` nodes with SigLIP (does not re-parse PDFs). Skip if
+`embedding_version` already matches. Student photos are never written here.
+
+```bash
+python scripts/embed_images.py
+python scripts/embed_images.py --force
+```
+
+### 7. Inspect the graph
 
 ```bash
 python scripts/inspect_graph.py
@@ -861,7 +928,7 @@ python scripts/inspect_graph.py --concepts 30
 python scripts/inspect_graph.py --images 10
 ```
 
-### 7. Test retrieval (no generator)
+### 8. Test retrieval (no generator)
 
 ```bash
 python scripts/test_retriever.py --query "what are the components of food" --grade 6 --subject science
@@ -870,34 +937,40 @@ python scripts/test_retriever.py --query "what are the components of food" --gra
 Prints dense, full-text, graph, fused and reranked results side by side with per
 channel ranks, scores, RRF scores and reranker scores. This script never calls
 the generator. Useful flags: `-q`/`--query`, `-g`/`--grade`, `-s`/`--subject`,
-`-u`/`--unit`, `--resource-type`, `--audience`, `--limit`, `--final-top-k`,
-`--no-rerank`, `--images`, `--json`.
+`--limit`, `--final-top-k`, `--no-rerank`, `--images`, `--json`. Grade and
+subject are required.
 
-### 8. Test the full RAG pipeline
+### 9. Test the full RAG pipeline
 
 ```bash
 python scripts/test_rag.py --query "what are the components of food" --grade 6 --subject science
 python scripts/test_rag.py --query "what are the components of food" --grade 6 --subject science --state GIVE_HINT
 python scripts/test_rag.py --query "how does light reflect from a plane mirror" --grade 10 --subject science --strict
-python scripts/test_rag.py --query "what is electrostatics" --grade 12 --subject science --retrieval-only
+python scripts/test_rag.py --query "what is electrostatics" --grade 12 --subject physics --retrieval-only
+python scripts/test_rag.py --image path/to/photo.jpg --grade 9 --subject science
 ```
 
-Runs filtering, all three channels, fusion, reranking and the evidence gate,
-prints concise diagnostics, and only then streams the Socratic response from
-Qwen3-VL. If the gate reports insufficient evidence, the generator is either
-asked to decline (`--strict` off) or not loaded at all (`--strict` on).
+Runs filtering, rewrite (with optional photo classify/transcribe), image kNN when
+a photo is given, fusion, reranking and the evidence gate, prints concise
+diagnostics, and only then streams the Socratic response from Qwen3-VL with the
+student photo when one was uploaded. Textbook figures are not shown in the
+answer. If the gate reports insufficient
+evidence, the generator is either asked to decline (`--strict` off) or not loaded
+at all (`--strict` on).
 
 Omit `-q`/`--query` (and optionally `-g`/`-s`) to be prompted interactively.
+`--image` may be used without a typed question. Grade and subject are always
+required.
 
 #### CLI flags
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `-q`, `--query` | *(prompt)* | Student question |
-| `-g`, `--grade` | any | Grade filter (`1`–`12`) |
-| `-s`, `--subject` | any | `science` or `mathematics` |
-| `-u`, `--unit` | any | Restrict retrieval to one unit id |
-| `--state` | `ASK_QUESTION` | Tutoring move (see table below) |
+| `-q`, `--query` | *(prompt)* | Student question. Optional when `--image` is set |
+| `--image PATH` | — | Student photo (not ingested). Query may be omitted |
+| `-g`, `--grade` | *(required)* | Class `1`–`12` |
+| `-s`, `--subject` | *(required)* | Gated by class: 1–2 maths; 3–10 maths/science; 11–12 maths/physics/chemistry/biology |
+| `--state` | `GIVE_HINT` | Tutoring move (see table below) |
 | `--retrieval-only` | off | Stop after the evidence gate; never load the generator |
 | `--strict` | off | On insufficient evidence, skip generation entirely |
 | `--max-new-tokens` | from config (`640`) | Cap streamed answer length for this run |
@@ -907,28 +980,25 @@ Omit `-q`/`--query` (and optionally `-g`/`-s`) to be prompted interactively.
 #### `--state` tutoring moves
 
 These change how the generator is prompted. They do **not** bypass the evidence
-gate, and there is no mode that reveals the full solution outright — every state
-is Socratic.
+gate. Leave `--state` blank to use `GIVE_HINT`.
 
 | Value | Behaviour |
 |-------|-----------|
-| `ASK_QUESTION` | Default. One short question to start thinking; no final answer. |
-| `GIVE_HINT` | One small hint, then ask the student to try that step. |
-| `CORRECT_MISCONCEPTION` | Acknowledge what is right; question the wrong assumption; correct from evidence only. |
-| `EXPLAIN_CONCEPT` | Two or three short sentences from the evidence, then a check question. |
-| `CONFIRM_STEP` | Confirm whether the student's step is correct and why, then ask about the next step. |
+| `GIVE_HINT` | Default. Maths: one hint toward the next working step; do not finish the solution. Science: a small concept hint; do not lecture. |
+| `EXPLAIN_CONCEPT` | Science: fully explain the concept from the evidence. Maths: give the fully worked solution from the evidence. Overrides the usual “never reveal the complete solution” rule and the ~180-word cap. |
+| `CONFIRM_ANSWER` | The question box may include both the problem and the student’s attempt. Judge from evidence only: if correct, say so; if wrong, say what is off and hint how to proceed (do not dump the full solution). |
 
 `INSUFFICIENT_EVIDENCE` is chosen automatically when the gate fails — it is not a
 valid `--state` value. With `--strict`, generation is skipped instead of running
 in that state.
 
-### 9. Generator sanity check (pre-existing)
+### 10. Generator sanity check (pre-existing)
 
 ```bash
 python scripts/test_generator.py
 ```
 
-### 10. Evaluate retrieval (needs manual labels)
+### 11. Evaluate retrieval (needs manual labels)
 
 ```bash
 python scripts/evaluate_retrieval.py --per-question
@@ -1000,7 +1070,8 @@ variables or `.env`. There are no magic numbers scattered through the code.
 | `PROCESSED_DATA_PATH` | `curriculum/processed` | Derived artefacts |
 | `EMBEDDING_MODEL_PATH` | `models/bge-m3` | BGE-M3 directory |
 | `RERANKER_MODEL_PATH` | `models/bge-reranker-v2-m3` | Reranker directory |
-| `GENERATOR_MODEL_PATH` | `models/qwen3-vl-8b-instruct` | Qwen3-VL directory |
+| `REWRITER_MODEL_PATH` | `models/qwen3-vl-2b-instruct` | Qwen3-VL-2B query rewriter |
+| `GENERATOR_MODEL_PATH` | `models/qwen3-vl-8b-instruct` | Qwen3-VL-8B tutor |
 | `CHUNK_TARGET_TOKENS` | `600` | Target chunk size |
 | `CHUNK_OVERLAP_TOKENS` | `100` | Overlap between chunks |
 | `CHUNK_MIN_TOKENS` | `80` | Below this a chunk is merged forward |
@@ -1020,9 +1091,19 @@ variables or `.env`. There are no magic numbers scattered through the code.
 | `EVIDENCE_MIN_RERANK_SCORE` | `0.0` | Minimum top reranker logit (0 ≈ sigmoid 0.5) |
 | `EVIDENCE_MIN_CHUNKS` | `1` | Minimum candidates required |
 | `EVIDENCE_MIN_STRONG_CHUNKS` | `1` | Chunks that must clear the score threshold |
-| `EVIDENCE_REQUIRE_SCOPE_MATCH` | `true` | Evidence must come from the requested grade/subject |
+| `EVIDENCE_REQUIRE_SCOPE_MATCH` | `true` | Evidence must come from this class or a high-scoring earlier class in the same subject lineage |
 | `EVIDENCE_MIN_QUERY_TERM_OVERLAP` | `0.15` | Fraction of query content words that must appear |
-| `MULTIMODAL_ENABLED` | `false` | Surface retrieved images alongside text |
+| `EVIDENCE_MIN_PRIOR_GRADE_RERANK_SCORE` | `1.0` | Rerank floor for earlier-class chunks (stricter than `EVIDENCE_MIN_RERANK_SCORE`) |
+| `IMAGE_EMBEDDING_MODEL_PATH` | `models/siglip-base-patch16-224` | SigLIP figure encoder |
+| `IMAGE_TOP_K` | `8` | Image-vector neighbours |
+| `IMAGE_MIN_SCORE` | `0.25` | Cosine floor for preferred output figures |
+| `WEIGHT_IMAGE` | `1.0` | Image-channel RRF weight |
+| `MULTIMODAL_ENABLED` | `true` | Student photo input (rewrite, image kNN, tutor vision). Textbook figures are not shown in the answer |
+| `GENERATOR_VRAM_RESERVE_GIB` | `5.5` | Floor GiB held back from 8B weights for vision prefill / KV cache (also scales with the card) |
+| `GENERATOR_VRAM_HEADROOM_FRACTION` | `0.25` | Extra headroom as a fraction of total VRAM (capped at 10 GiB) |
+| `GENERATOR_CPU_RAM_FRACTION` | `0.80` | Fraction of physical RAM for CPU-offloaded 8B layers |
+| `GENERATOR_MAX_IMAGE_PIXELS` | `0` | `0` = pick Qwen-VL `max_pixels` from VRAM size |
+| `GENERATOR_MAX_EVIDENCE_CHARS` | `1000` | Per-chunk evidence character budget |
 | `EMBEDDING_BATCH_SIZE` | `8` | Embedding batch size |
 | `EMBEDDING_DEVICE` | `auto` | `cuda`, `cpu`, or auto-detect |
 | `RERANKER_BATCH_SIZE` | `4` | Reranker batch size |
@@ -1063,6 +1144,8 @@ cd frontend && npm test -- --run
 | `tests/test_trace.py` | trace models, observer events, fusion/rerank/evidence/prompt | no |
 | `tests/test_graph_trace.py` | ignored-node reason codes, diagnostic classification | no |
 | `tests/test_visualizer_api.py` | FastAPI health, runs, SSE (fake pipeline) | no |
+| `tests/test_multimodal.py` | rewrite image JSON, path sandbox, lineage, skip-live embed/kNN | no (live parts skip) |
+| `tests/test_model_memory.py` | GPU/RAM weight split, pixel cap, release-before-generate | no |
 | `tests/test_retrieval.py` | live channels, metadata isolation, traceability | yes (skips if absent) |
 
 `tests/test_retrieval.py` skips rather than fails when Neo4j, an ingested corpus
@@ -1086,6 +1169,11 @@ sih-stem-rag/
 │       ├── chunker.py          hierarchical token-aware chunking
 │       ├── concepts.py         conservative concept extraction
 │       ├── embeddings.py       BGE-M3 dense embeddings
+│       ├── image_embeddings.py SigLIP textbook-figure encoder
+│       ├── image_retriever.py  image kNN + page-chunk fusion
+│       ├── image_index.py      embed existing Image nodes
+│       ├── image_paths.py      curriculum-path sandbox
+│       ├── image_serve.py      browser-safe PNG conversion for figures
 │       ├── reranker.py         BGE-reranker-v2-m3
 │       ├── neo4j_store.py      driver wrapper, error translation
 │       ├── graph_schema.py     labels, constraints, vector/full-text indexes
@@ -1096,8 +1184,10 @@ sih-stem-rag/
 │       ├── graph_retriever.py  bounded graph expansion
 │       ├── fusion.py           weighted RRF
 │       ├── evidence.py         evidence sufficiency gate
+│       ├── query_rewrite.py    Qwen3-VL-2B retrieval query rewriter
 │       ├── socratic.py         tutoring controller and prompts
-│       ├── generator.py        Qwen3-VL wrapper with streaming
+│       ├── generator.py        Qwen3-VL-8B wrapper with streaming
+│       ├── model_memory.py     adaptive GPU/RAM weight placement
 │       ├── pipeline.py         HybridRetriever + SocraticRagPipeline
 │       ├── trace.py            optional run/stage trace models
 │       └── graph_trace.py      bounded ignored-node graph diagnostics
@@ -1107,9 +1197,11 @@ sih-stem-rag/
 │   ├── download_curriculum.py
 │   ├── replace_corpus.py
 │   ├── download_retrieval_models.py
+│   ├── download_qwen_models.py
 │   ├── neo4j_local.sh
 │   ├── init_neo4j.py
 │   ├── ingest_corpus.py
+│   ├── embed_images.py
 │   ├── inspect_graph.py
 │   ├── test_retriever.py
 │   ├── test_rag.py
@@ -1120,8 +1212,10 @@ sih-stem-rag/
 ├── curriculum/                manifests + alignment committed; raw/ processed git-ignored
 ├── models/                     git-ignored
 │   ├── qwen3-vl-8b-instruct/
+│   ├── qwen3-vl-2b-instruct/
 │   ├── bge-m3/
-│   └── bge-reranker-v2-m3/
+│   ├── bge-reranker-v2-m3/
+│   └── siglip-base-patch16-224/
 ├── .neo4j-local/               git-ignored Neo4j tarball + JDK 21 + DB data
 ├── data/evaluation/          JSONL schema + labelling guide
 ```
@@ -1134,10 +1228,11 @@ after provisioning `.neo4j-local/` as described in [Neo4j setup](#neo4j-setup).
 - **BGE-M3 sparse (lexical-weight) retrieval is not implemented.** Lexical
   matching comes from the Neo4j full-text index instead.
 - **ColBERT / multi-vector late-interaction retrieval is not implemented.**
-- **Multimodal embeddings are not implemented.** No image or page is embedded.
-- **Images are stored and referenced through graph paths only.** `Image` nodes
-  carry file paths and page provenance; retrieval reaches them structurally, not
-  visually. Passing a rendered page to Qwen3-VL is possible but off by default.
+- **Student photos are never stored as `Image` nodes.** Uploads are temporary
+  query files, deleted after the run. Output figures are only Neo4j `Image`
+  rows (files under `curriculum/processed/images/`). Textbook figures are not
+  shown in the answer. A student photo is input only (rewrite, retrieval, tutor).
+  The 8B tutor must not draw or invent a diagram.
 - **Concept relationships are intentionally conservative.** Only `MENTIONS` and
   `ILLUSTRATES`, both requiring textual evidence. No inferred semantic edges.
 - **Full student-state modelling is not implemented.** The Socratic controller
@@ -1158,7 +1253,7 @@ after provisioning `.neo4j-local/` as described in [Neo4j setup](#neo4j-setup).
   so the shared span is not always a whole paragraph.
 - OCR is not used. Pages with no text layer are recorded as image-only and
   contribute no chunks.
-- Generation can be slow.
+- Generation can be slow, especially when layers are CPU-offloaded on 8–12 GiB GPUs.
 
 ## Future experimental directions
 

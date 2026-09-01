@@ -19,7 +19,10 @@ flag on ``scripts/ingest_corpus.py``.
 from __future__ import annotations
 
 import json
+import multiprocessing
+import os
 import time
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Sequence
@@ -59,7 +62,8 @@ LOGGER = get_logger(__name__)
 #       instead of being skipped.
 #   v4: section-aware partitions, boilerplate/practice exclusion, granular CISCE.
 #   v5: NCERT chapter PDFs; native CBSE/NCERT alignment (no CISCE YAML).
-INGEST_VERSION = "ingest-v5"
+#   v6: Class 11–12 physics/chemistry/biology stored as subject, not science.
+INGEST_VERSION = "ingest-v6"
 
 # Ceiling on MENTIONS edges per concept, to stop a common term from becoming a
 # hub node that graph expansion would traverse into uselessly.
@@ -68,6 +72,31 @@ MAX_MENTIONS_PER_CONCEPT = 400
 MAX_CONCEPTS_PER_CHUNK = 8
 # Concepts an image may be linked to via its page's section titles.
 MAX_CONCEPTS_PER_IMAGE = 2
+
+
+def _parse_job(
+    job: tuple[str, str, DocumentMetadata, str, Any],
+) -> tuple[str, ParsedDocument | None, str | None]:
+    """Parse one PDF/ePUB in a worker process. Spawn-safe (no CUDA in parent)."""
+    relative, file_format, metadata, images_root, ingest = job
+    try:
+        from pathlib import Path
+
+        from rag.epub_parser import EpubParseError, parse_epub_document
+        from rag.pdf_parser import PdfParseError, parse_document
+
+        images = Path(images_root)
+        if file_format == "epub":
+            parsed = parse_epub_document(
+                metadata, images_root=images, config=ingest
+            )
+        else:
+            parsed = parse_document(metadata, images_root=images, config=ingest)
+        return relative, parsed, None
+    except Exception:
+        import traceback
+
+        return relative, None, traceback.format_exc()
 
 
 # --------------------------------------------------------------------------- #
@@ -779,6 +808,7 @@ class CorpusIngestor:
         *,
         skip_embeddings: bool = False,
         force: bool = False,
+        parsed: ParsedDocument | None = None,
     ) -> str:
         """Ingest one source file. Returns "ingested", "skipped" or "failed"."""
         if metadata.content_partition == EVALUATION_ONLY:
@@ -803,18 +833,19 @@ class CorpusIngestor:
             return "skipped"
 
         try:
-            if metadata.file_format == "epub":
-                parsed = parse_epub_document(
-                    metadata,
-                    images_root=self.config.paths.images_dir,
-                    config=self.config.ingest,
-                )
-            else:
-                parsed = parse_document(
-                    metadata,
-                    images_root=self.config.paths.images_dir,
-                    config=self.config.ingest,
-                )
+            if parsed is None:
+                if metadata.file_format == "epub":
+                    parsed = parse_epub_document(
+                        metadata,
+                        images_root=self.config.paths.images_dir,
+                        config=self.config.ingest,
+                    )
+                else:
+                    parsed = parse_document(
+                        metadata,
+                        images_root=self.config.paths.images_dir,
+                        config=self.config.ingest,
+                    )
         except (PdfParseError, EpubParseError) as exc:
             self.stats.failures.append((metadata.relative_pdf_path, str(exc)))
             LOGGER.error("Failed to parse %s: %s", metadata.relative_pdf_path, exc)
@@ -911,6 +942,55 @@ class CorpusIngestor:
         self.stats.images += image_count
         return "ingested"
 
+    def _parse_documents_parallel(
+        self,
+        documents: Sequence[DocumentMetadata],
+        workers: int,
+        *,
+        skip_embeddings: bool,
+        force: bool,
+    ) -> dict[str, ParsedDocument]:
+        """Parse PDFs in spawned workers so CUDA in this process is not forked."""
+        to_parse: list[DocumentMetadata] = []
+        for metadata in documents:
+            if metadata.content_partition == EVALUATION_ONLY:
+                continue
+            if not force:
+                try:
+                    content_hash = compute_content_hash(metadata.local_pdf_path)
+                except OSError:
+                    to_parse.append(metadata)
+                    continue
+                if self._document_is_current(
+                    metadata, content_hash, need_embeddings=not skip_embeddings
+                ):
+                    continue
+            to_parse.append(metadata)
+        if not to_parse:
+            return {}
+
+        images_root = str(self.config.paths.images_dir)
+        jobs = [
+            (
+                meta.relative_pdf_path,
+                meta.file_format,
+                meta,
+                images_root,
+                self.config.ingest,
+            )
+            for meta in to_parse
+        ]
+        parsed: dict[str, ParsedDocument] = {}
+        ctx = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as pool:
+            for relative, result, error in pool.map(_parse_job, jobs, chunksize=1):
+                if error or result is None:
+                    LOGGER.error("Parallel parse failed for %s: %s", relative, error)
+                    continue
+                parsed[relative] = result
+        LOGGER.info("Parsed %d/%d documents in worker processes", len(parsed), len(to_parse))
+        return parsed
+
     # -- corpus driver ----------------------------------------------------- #
 
     def run(
@@ -922,6 +1002,7 @@ class CorpusIngestor:
         skip_embeddings: bool = False,
         force: bool = False,
         link_concepts: bool = True,
+        parse_workers: int | None = None,
     ) -> IngestStats:
         started = time.perf_counter()
 
@@ -936,8 +1017,33 @@ class CorpusIngestor:
 
         dimension = self.embedder.dimension
         LOGGER.info("BGE-M3 dense dimension detected from checkpoint: %d", dimension)
-        schema = initialize_schema(self.store, dimension)
+        image_dim = None
+        try:
+            from .image_embeddings import read_image_hidden_size
+
+            image_dim = read_image_hidden_size(
+                self.config.models.image_embedding_model_path
+            )
+        except Exception:
+            LOGGER.info("SigLIP not present; skipping image vector index at ingest")
+        schema = initialize_schema(
+            self.store, dimension, image_embedding_dimension=image_dim
+        )
         LOGGER.info("Graph schema ready\n%s", schema.describe())
+
+        workers = parse_workers
+        if workers is None:
+            workers = min(os.cpu_count() or 1, 8)
+        workers = max(1, int(workers))
+        parsed_by_path: dict[str, ParsedDocument] = {}
+        if workers > 1:
+            LOGGER.info("Parsing PDFs with %d worker processes", workers)
+            parsed_by_path = self._parse_documents_parallel(
+                documents,
+                workers,
+                skip_embeddings=skip_embeddings,
+                force=force,
+            )
 
         for index, metadata in enumerate(documents, start=1):
             LOGGER.info(
@@ -945,7 +1051,10 @@ class CorpusIngestor:
             )
             try:
                 outcome = self.ingest_document(
-                    metadata, skip_embeddings=skip_embeddings, force=force
+                    metadata,
+                    skip_embeddings=skip_embeddings,
+                    force=force,
+                    parsed=parsed_by_path.get(metadata.relative_pdf_path),
                 )
             except KeyboardInterrupt:
                 LOGGER.warning(

@@ -32,6 +32,7 @@ class FakePipeline:
         if observer is not None:
             observer.on_event("run_started", {"query": query, "filters": {}, "retrieval_only": kwargs.get("retrieval_only")})
             observer.on_event("filters_applied", {"scope": "grade=1"})
+            observer.on_event("rewrite_completed", {"retrieval_query": query, "fallback": True, "elapsed_ms": 1.0, "summary": "fallback"})
             observer.on_event("dense_started", {})
             if self.delay:
                 time.sleep(self.delay)
@@ -105,7 +106,9 @@ class TestHealth:
             "embedding_model_path_present",
             "reranker_model_path_present",
             "generator_model_path_present",
-            "frontend_build_present",
+        "rewriter_model_path_present",
+        "image_embedding_model_path_present",
+        "frontend_build_present",
         ):
             assert key in body
         assert body["neo4j"] in {"ok", "unavailable"}
@@ -113,28 +116,120 @@ class TestHealth:
 
 class TestRuns:
     def test_create_run_returns_id(self, client):
-        response = client.post("/api/runs", json={"query": "how does weather change from day to day", "grade": 3})
+        response = client.post(
+            "/api/runs",
+            json={"query": "how does weather change from day to day", "grade": 3, "subject": "science"},
+        )
         assert response.status_code == 202
         body = response.json()
         assert body["run_id"]
         assert body["status"] in {"queued", "running"}
 
     def test_validation_rejects_empty_query(self, client):
-        response = client.post("/api/runs", json={"query": "   "})
+        response = client.post("/api/runs", json={"query": "   ", "grade": 3, "subject": "science"})
         assert response.status_code == 422
 
+    def test_validation_requires_grade_and_subject(self, client):
+        assert client.post("/api/runs", json={"query": "how does weather change"}).status_code == 422
+        assert client.post(
+            "/api/runs", json={"query": "how does weather change", "grade": 3}
+        ).status_code == 422
+        assert client.post(
+            "/api/runs", json={"query": "how does weather change", "subject": "science"}
+        ).status_code == 422
+
     def test_validation_rejects_bad_grade(self, client):
-        response = client.post("/api/runs", json={"query": "what are the components of food", "grade": 13})
+        response = client.post(
+            "/api/runs",
+            json={"query": "what are the components of food", "grade": 13, "subject": "science"},
+        )
         assert response.status_code == 422
 
     def test_validation_rejects_bad_subject(self, client):
-        response = client.post("/api/runs", json={"query": "how does weather change", "subject": "history"})
+        response = client.post(
+            "/api/runs", json={"query": "how does weather change", "grade": 3, "subject": "history"}
+        )
         assert response.status_code == 422
+
+    def test_validation_gates_pcb_by_grade(self, client):
+        assert client.post(
+            "/api/runs",
+            json={"query": "what is electrostatics", "grade": 6, "subject": "physics"},
+        ).status_code == 422
+        ok = client.post(
+            "/api/runs",
+            json={"query": "what is electrostatics", "grade": 12, "subject": "physics"},
+        )
+        assert ok.status_code == 202
+
+    def test_validation_rejects_hidden_user_fields(self, client):
+        response = client.post(
+            "/api/runs",
+            json={
+                "query": "how does weather change",
+                "grade": 3,
+                "subject": "science",
+                "unit": "secret",
+            },
+        )
+        assert response.status_code == 422
+
+    def test_curriculum_options(self, client):
+        response = client.get("/api/curriculum-options")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["subjects_by_grade"]["1"] == ["mathematics"]
+        assert body["subjects_by_grade"]["6"] == ["mathematics", "science"]
+        assert body["subjects_by_grade"]["12"] == [
+            "mathematics",
+            "physics",
+            "chemistry",
+            "biology",
+        ]
 
     def test_unknown_run(self, client):
         assert client.get("/api/runs/does-not-exist").status_code == 404
         assert client.get("/api/runs/does-not-exist/trace").status_code == 404
         assert client.get("/api/runs/does-not-exist/events").status_code == 404
+
+    def test_unknown_curriculum_image_404(self, client):
+        assert client.get("/api/curriculum-images/missing-id").status_code == 404
+
+    def test_curriculum_image_is_inline_png(self, tmp_path):
+        png = tmp_path / "fig.png"
+        png.write_bytes(
+            bytes.fromhex(
+                "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+                "0000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082"
+            )
+        )
+        store = RunStore(max_runs=8, keepalive_seconds=0.05)
+
+        def factory():
+            return FakePipeline()
+
+        app = create_app(
+            pipeline_factory=factory,
+            store=store,
+            serve_frontend=False,
+            curriculum_image_lookup=lambda image_id: png if image_id == "p1:img01" else None,
+        )
+        with TestClient(app) as local:
+            response = local.get("/api/curriculum-images/p1:img01")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("image/png")
+        assert response.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+    def test_multipart_image_without_query(self, client, tmp_path):
+        response = client.post(
+            "/api/runs",
+            data={"grade": "3", "subject": "science"},
+            files={"image": ("cell.png", b"not-a-real-png", "image/png")},
+        )
+        assert response.status_code == 202
+        run_id = response.json()["run_id"]
+        done = _wait_done(client, run_id)
+        assert done["status"] == "completed"
 
     def test_queued_then_completed(self, client):
         created = client.post("/api/runs", json={"query": "how does weather change", "grade": 3, "subject": "science"})
@@ -150,7 +245,10 @@ class TestRuns:
     def test_history_capped_at_20(self, client):
         ids = []
         for index in range(21):
-            response = client.post("/api/runs", json={"query": f"q{index}"})
+            response = client.post(
+                "/api/runs",
+                json={"query": f"q{index}", "grade": 3, "subject": "science"},
+            )
             ids.append(response.json()["run_id"])
             _wait_done(client, ids[-1])
         assert client.get(f"/api/runs/{ids[0]}").status_code == 404
@@ -159,7 +257,7 @@ class TestRuns:
 
 class TestSSE:
     def test_sse_framing_and_event_order(self, client):
-        created = client.post("/api/runs", json={"query": "how does weather change"})
+        created = client.post("/api/runs", json={"query": "how does weather change", "grade": 3, "subject": "science"})
         run_id = created.json()["run_id"]
         with client.stream("GET", f"/api/runs/{run_id}/events") as stream:
             text = "".join(stream.iter_text())
@@ -183,7 +281,7 @@ class TestSSE:
         store = RunStore(keepalive_seconds=0.05)
         app = create_app(pipeline_factory=lambda: pipeline, store=store, serve_frontend=False)
         with TestClient(app) as client:
-            run_id = client.post("/api/runs", json={"query": "how does weather change"}).json()["run_id"]
+            run_id = client.post("/api/runs", json={"query": "how does weather change", "grade": 3, "subject": "science"}).json()["run_id"]
             done = _wait_done(client, run_id)
             assert done["status"] == "failed"
             with client.stream("GET", f"/api/runs/{run_id}/events") as stream:
@@ -191,7 +289,7 @@ class TestSSE:
             assert "event: run_failed" in text
 
     def test_late_subscriber_gets_snapshot(self, client):
-        run_id = client.post("/api/runs", json={"query": "how does weather change"}).json()["run_id"]
+        run_id = client.post("/api/runs", json={"query": "how does weather change", "grade": 3, "subject": "science"}).json()["run_id"]
         _wait_done(client, run_id)
         with client.stream("GET", f"/api/runs/{run_id}/events") as stream:
             text = "".join(stream.iter_text())
@@ -203,7 +301,7 @@ class TestSSE:
         store = RunStore(keepalive_seconds=0.05)
         app = create_app(pipeline_factory=lambda: pipeline, store=store, serve_frontend=False)
         with TestClient(app) as client:
-            run_id = client.post("/api/runs", json={"query": "how does weather change"}).json()["run_id"]
+            run_id = client.post("/api/runs", json={"query": "how does weather change", "grade": 3, "subject": "science"}).json()["run_id"]
             with client.stream("GET", f"/api/runs/{run_id}/events") as stream:
                 text = "".join(stream.iter_text())
         assert ": keepalive" in text

@@ -133,6 +133,20 @@ class TestFilterTranslation:
         assert params["flt_grade"] == 3
         assert params["flt_subject"] == "science"
 
+    def test_prior_grade_lookback_uses_lineage_subjects(self):
+        clause, params = build_filter_clause(
+            RetrievalFilter(grade=12, subject="physics", allow_prior_grades=True)
+        )
+        assert "c.grade <= $flt_grade" in clause
+        assert "c.subject IN $flt_subjects" in clause
+        assert params["flt_grade"] == 12
+        assert params["flt_subjects"] == ["physics", "science"]
+        maths, maths_params = build_filter_clause(
+            RetrievalFilter(grade=12, subject="mathematics", allow_prior_grades=True)
+        )
+        assert maths_params["flt_subjects"] == ["mathematics"]
+        assert "science" not in maths_params["flt_subjects"]
+
     def test_values_are_never_inlined_into_cypher(self):
         """Everything is a bound parameter, so no query-injection surface."""
         clause, params = build_filter_clause(

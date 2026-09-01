@@ -128,9 +128,10 @@ class DenseRetriever:
         self.last_vector_preview = vector_list[:8]
 
         filter_clause, filter_params = build_filter_clause(scope, "c")
+        oversample = self.oversample * 2 if scope.allow_prior_grades else self.oversample
         candidate_k = min(
             MAX_CANDIDATE_K,
-            limit * self.oversample if filter_clause else limit,
+            limit * oversample if filter_clause else limit,
         )
 
         params: dict[str, Any] = {

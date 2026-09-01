@@ -13,7 +13,9 @@ export function LiveResponse({ trace, running }: Props) {
         <h2>Generator output</h2>
       </header>
       {trace || running ? (
-        <GenerationOutput trace={trace} running={running} />
+        <>
+          <GenerationOutput trace={trace} running={running} />
+        </>
       ) : (
         <p className="muted">Submit a question to stream the tutor response here.</p>
       )}

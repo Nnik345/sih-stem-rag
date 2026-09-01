@@ -1,6 +1,8 @@
 export const STAGE_ORDER = [
   "query",
   "filters",
+  "rewrite",
+  "image",
   "dense",
   "lexical",
   "graph",
@@ -179,19 +181,27 @@ export interface RunTrace {
     skip_reason: string;
   } | null;
   generation: { tokens: string[]; response_text: string; elapsed_ms: number } | null;
+  rewrite: {
+    original_query: string;
+    retrieval_query: string;
+    intent: string | null;
+    fallback: boolean;
+    reason?: string;
+    input_kind?: string;
+    transcribed_question?: string;
+  } | null;
+  image: { hits: { image_id: string; score: number; page_number?: number }[]; skipped?: boolean } | null;
+  attached_figures: { image_id: string; page_number?: number; score?: number; source?: string }[];
 }
 
 export interface QueryFormState {
   query: string;
   grade: string;
   subject: string;
-  unit: string;
-  resource_type: string;
-  audience: string;
-  document_id: string;
   tutor_state: string;
   retrieval_only: boolean;
   strict: boolean;
+  imageFile: File | null;
 }
 
 export interface SseEnvelope {
@@ -204,13 +214,10 @@ export const EMPTY_FORM: QueryFormState = {
   query: "",
   grade: "",
   subject: "",
-  unit: "",
-  resource_type: "",
-  audience: "",
-  document_id: "",
   tutor_state: "",
   retrieval_only: false,
   strict: false,
+  imageFile: null,
 };
 
 export function emptyStages(): Record<StageName, StageTrace> {

@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
+from .curriculum_catalog import in_lineage_scope, lineage_subjects
 from .schemas import RetrievalFilter, RetrievedChunk
 
 # Reason codes required by the visualizer.
@@ -282,9 +283,13 @@ class GraphTrace:
 
 def chunk_matches_scope(row: DiagnosticRow, scope: RetrievalFilter) -> bool:
     """Python-side copy of the Cypher metadata predicate, used only for labelling."""
-    if scope.grade is not None and row.grade != scope.grade:
-        return False
-    if scope.subject is not None and (row.subject or "").lower() != str(scope.subject).lower():
+    if not in_lineage_scope(
+        chunk_grade=row.grade,
+        chunk_subject=row.subject,
+        current_grade=scope.grade,
+        current_subject=scope.subject,
+        allow_prior_grades=scope.allow_prior_grades,
+    ):
         return False
     if scope.unit_id is not None and row.unit_id != scope.unit_id:
         return False
@@ -303,10 +308,27 @@ def chunk_matches_scope(row: DiagnosticRow, scope: RetrievalFilter) -> bool:
 
 def mismatch_detail(row: DiagnosticRow, scope: RetrievalFilter) -> str:
     parts: list[str] = []
-    if scope.grade is not None and row.grade != scope.grade:
-        parts.append(f"grade {row.grade!r} != {scope.grade}")
-    if scope.subject is not None and (row.subject or "").lower() != str(scope.subject).lower():
-        parts.append(f"subject {row.subject!r} != {scope.subject!r}")
+    if not in_lineage_scope(
+        chunk_grade=row.grade,
+        chunk_subject=row.subject,
+        current_grade=scope.grade,
+        current_subject=scope.subject,
+        allow_prior_grades=scope.allow_prior_grades,
+    ):
+        if scope.grade is not None and (
+            row.grade is None
+            or (scope.allow_prior_grades and int(row.grade) > int(scope.grade))
+            or (not scope.allow_prior_grades and row.grade != scope.grade)
+        ):
+            parts.append(f"grade {row.grade!r} != {scope.grade}")
+        if scope.subject is not None:
+            subject = (row.subject or "").lower()
+            wanted = str(scope.subject).lower()
+            if scope.allow_prior_grades:
+                if subject not in lineage_subjects(wanted):
+                    parts.append(f"subject {row.subject!r} not in lineage {wanted!r}")
+            elif subject != wanted:
+                parts.append(f"subject {row.subject!r} != {scope.subject!r}")
     if scope.unit_id is not None and row.unit_id != scope.unit_id:
         parts.append(f"unit_id {row.unit_id!r} != {scope.unit_id!r}")
     if scope.resource_type is not None and row.resource_type != scope.resource_type:
