@@ -12,6 +12,7 @@ from rag.query_rewrite import (
     build_rewrite_user_prompt,
     parse_rewrite_output,
     question_needs_textbook_figure,
+    specialize_maths_retrieval_query,
 )
 
 
@@ -100,9 +101,10 @@ def test_rewriter_unloads_before_dense_uses_rewritten_query():
     )
     assert order[0] == "rewrite"
     assert order[1] == "unload"
-    assert order[2] == ("dense", "derivative of x squared")
-    assert order[3] == ("lexical", "derivative of x squared")
-    assert response.diagnostics.retrieval_query == "derivative of x squared"
+    ncert_query = "algebra of derivative of functions derivative of x to the power n"
+    assert order[2] == ("dense", ncert_query)
+    assert order[3] == ("lexical", ncert_query)
+    assert response.diagnostics.retrieval_query == ncert_query
     assert response.diagnostics.rewrite_fallback is False
     assert response.query == "differentiation of x^2"
     assert response.scope.allow_prior_grades is True
@@ -142,6 +144,50 @@ def test_rewrite_prompt_does_not_request_figures_for_ordinary_explanations():
     blob = REWRITE_SYSTEM_PROMPT.lower()
     assert "diagram" in blob
     assert "only when the student asked to see one" in blob
+
+
+def test_specialize_maths_retrieval_query_replaces_photo_equation():
+    equation = "d/dx (3x^2 - 4x + 3) = 6x - 4"
+    out = specialize_maths_retrieval_query(equation, transcribed=equation)
+    assert "algebra of derivative" in out
+    assert "power n" in out
+    assert "3x" not in out
+    assert "power rule" not in out
+    # Differentiation cues always map to NCERT wording, even if the rewriter
+    # already produced a "rule" phrase with no instance tokens.
+    rewriter = "derivative of a quadratic polynomial using the power rule"
+    assert specialize_maths_retrieval_query(rewriter, original=equation) == out
+
+
+def test_maths_instance_retrieval_query_is_specialised_before_dense():
+    config = load_config(require_neo4j=False)
+    order: list[object] = []
+    equation = "d/dx (3x^2 - 4x + 3) = 6x - 4"
+
+    class FakeRewriter:
+        def rewrite(self, query, *, grade=None, subject=None, **kwargs):
+            return QueryRewriteResult(
+                original_query=query,
+                retrieval_query=equation,
+                intent="verify",
+                fallback=False,
+                transcribed_question=equation,
+                input_kind="math_problem",
+            )
+
+        def unload(self):
+            return None
+
+    retriever = HybridRetriever(config, MagicMock(), rewriter=FakeRewriter())
+    retriever.dense.retrieve = lambda query, scope=None: (
+        order.append(("dense", query)) or []
+    )
+    retriever.lexical.retrieve = lambda query, scope=None: []
+    retriever.graph.retrieve = lambda *args, **kwargs: []
+    response = retriever.retrieve(equation, grade=11, subject="mathematics")
+    expected = "algebra of derivative of functions derivative of x to the power n"
+    assert order[0] == ("dense", expected)
+    assert response.diagnostics.retrieval_query == expected
 
 
 def test_question_needs_textbook_figure_only_for_visuals():

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import ModelConfig
+from .evidence import has_maths_instance_token, strip_maths_instance_text
 from .logging_utils import get_logger
 from .model_memory import cuda_max_memory_map, empty_cuda_cache, tighter_max_memory_map
 
@@ -27,6 +28,15 @@ LOGGER = get_logger(__name__)
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 _ALLOWED_INTENTS = frozenset({"explain", "verify", "practice", "other"})
 _ALLOWED_INPUT_KINDS = frozenset({"math_problem", "diagram", "other"})
+_DIFF_CUE_RE = re.compile(
+    r"(?:d\s*/\s*d[xy]|dy\s*/\s*dx|differenti\w*|derivative)",
+    re.IGNORECASE,
+)
+_COMPOSITE_POWER_RE = re.compile(r"\)\s*\^\s*\d+")
+_POLYNOMIAL_POWER_RULE_QUERY = (
+    "algebra of derivative of functions derivative of x to the power n"
+)
+_CHAIN_RULE_QUERY = "derivative of composite functions"
 
 # Textbook figures are attached only when the student asked for a visual, not
 # because a retrieved page happens to contain an image.
@@ -93,6 +103,37 @@ input_kind:
 transcribed_question is what the tutor should see as the student question. Do not solve the problem. Do not invent labels that are not visible.
 If the student also typed text, keep that meaning and merge it with what the photo shows.
 """
+
+
+def specialize_maths_retrieval_query(
+    retrieval_query: str,
+    *,
+    original: str = "",
+    transcribed: str = "",
+) -> str:
+    """Search the curriculum rule, not the student's specific polynomial.
+
+    The 2B rewriter is asked to do this, but a photo of working often comes back
+    as the equation itself. Searching that instance will not hit NCERT, even
+    when the power rule is on the page.
+    """
+    text = (retrieval_query or "").strip()
+    if not text:
+        text = (transcribed or original or "").strip()
+    blob = f"{text} {original or ''} {transcribed or ''}"
+    # NCERT never says "power rule". If the rewriter keeps that phrase (or
+    # "quadratic polynomial"), search hits Class 10 polynomials and the
+    # reranker scores the real Limits-and-Derivatives pages below 0.
+    if _DIFF_CUE_RE.search(blob):
+        if _COMPOSITE_POWER_RE.search(blob):
+            return _CHAIN_RULE_QUERY
+        return _POLYNOMIAL_POWER_RULE_QUERY
+    stripped = strip_maths_instance_text(text)
+    if stripped and not has_maths_instance_token(text):
+        return text
+    if stripped:
+        return stripped
+    return text
 
 
 def question_needs_textbook_figure(

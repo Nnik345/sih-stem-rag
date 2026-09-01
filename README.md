@@ -825,8 +825,9 @@ formats retrieved evidence with its provenance, and supports tutoring states:
 interface takes a conversation history so it does not assume one-shot answers.
 
 The generator is instructed to treat retrieved curriculum as the factual basis
-and not to fabricate curriculum facts. `GIVE_HINT` and `CONFIRM_ANSWER` stay
-Socratic (no complete solution, about 180 words). `EXPLAIN_CONCEPT` is the
+and not to fabricate curriculum facts. `GIVE_HINT` stays Socratic (no complete
+solution, about 180 words). `CONFIRM_ANSWER` marks the attempt: if it is right,
+say so and stop; if it is wrong, one hint, no quiz. `EXPLAIN_CONCEPT` is the
 exception: science gets a full concept explanation and mathematics gets a fully
 worked solution, still grounded in evidence. Source metadata (document, page,
 unit, chunk) is preserved internally so citations can be surfaced later; no URLs
@@ -986,7 +987,7 @@ gate. Leave `--state` blank to use `GIVE_HINT`.
 |-------|-----------|
 | `GIVE_HINT` | Default. Maths: one hint toward the next working step; do not finish the solution. Science: a small concept hint; do not lecture. |
 | `EXPLAIN_CONCEPT` | Science: fully explain the concept from the evidence. Maths: give the fully worked solution from the evidence. Overrides the usual “never reveal the complete solution” rule and the ~180-word cap. |
-| `CONFIRM_ANSWER` | The question box may include both the problem and the student’s attempt. Judge from evidence only: if correct, say so; if wrong, say what is off and hint how to proceed (do not dump the full solution). |
+| `CONFIRM_ANSWER` | The question box may include both the problem and the student’s attempt. Mark it: if correct, say so and stop (do not quiz). If wrong, say what is off and give one hint (do not dump the full solution). |
 
 `INSUFFICIENT_EVIDENCE` is chosen automatically when the gate fails — it is not a
 valid `--state` value. With `--strict`, generation is skipped instead of running

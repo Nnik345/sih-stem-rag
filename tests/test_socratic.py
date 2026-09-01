@@ -79,7 +79,7 @@ def test_explain_concept_maths_vs_science_and_drops_guided_rules():
         assert "Stay grounded in the evidence" in prompt
 
 
-def test_confirm_answer_same_instruction_and_keeps_guided_rules():
+def test_confirm_answer_marks_attempt_and_does_not_quiz():
     controller = SocraticController()
     maths = controller.system_prompt(
         TutorState.CONFIRM_ANSWER, RetrievalFilter(grade=9, subject="mathematics")
@@ -87,12 +87,13 @@ def test_confirm_answer_same_instruction_and_keeps_guided_rules():
     science = controller.system_prompt(
         TutorState.CONFIRM_ANSWER, RetrievalFilter(grade=9, subject="science")
     )
-    assert "attempted answer" in maths
-    assert "do not dump the full solution" in maths
-    assert "EXPR equals RESULT as an identity" in maths
-    assert "attempted answer" in science
-    assert "180 words" in maths
-    assert "Never reveal the complete solution" in science
+    assert "Output one JSON object only" in maths
+    assert "mistake_groups" in maths
+    assert "cannot see CURRICULUM EVIDENCE" in maths
+    assert "EXPR" in maths
+    assert "Output one JSON object only" in science
+    assert "Ask one question at a time" not in maths
+    assert "Ask exactly one guiding question" not in maths
 
 
 def test_confirm_answer_user_prompt_notes_attempt():
@@ -102,7 +103,9 @@ def test_confirm_answer_user_prompt_notes_attempt():
         (),
         state=TutorState.CONFIRM_ANSWER,
     )
-    assert "attempted answer" in prompt
+    assert "output JSON only" in prompt
+    assert "mistake_groups" in prompt
+    assert "equivalent" in prompt
     hint_prompt = controller.user_prompt(
         "Find 2+2.",
         (),
@@ -142,5 +145,22 @@ def test_system_prompt_applies_retrieved_rule_and_does_not_leak_on_insufficient(
     for prompt in (hint, confirm):
         assert "apply that rule" in prompt
         assert "earlier class" in prompt
+    assert "private check" in confirm
     assert "apply that rule" not in insufficient
     assert "numeric or algebraic answer from general knowledge" in insufficient
+
+
+def test_every_state_hides_evidence_from_the_student():
+    controller = SocraticController()
+    scope = RetrievalFilter(grade=11, subject="mathematics")
+    for state in TutorState:
+        system = controller.system_prompt(state, scope)
+        assert "cannot see CURRICULUM EVIDENCE" in system
+        assert "according to E1" in system
+        user = controller.user_prompt("What is a derivative?", (), state=state)
+        assert "hidden from the student" in user
+        assert "according to the evidence" in user
+        if state is TutorState.INSUFFICIENT_EVIDENCE:
+            assert "Do not mention [E1] labels" in user
+        else:
+            assert "Never name [E1]" in user

@@ -138,6 +138,32 @@ def test_maths_overlap_ignores_algebraic_instance_tokens():
     assert decision.sufficient
 
 
+def test_maths_photo_equation_does_not_need_the_same_polynomial_in_the_book():
+    from rag.evidence import concept_terms
+
+    query = "d/dx (3x^2 - 4x + 3) = 6x - 4"
+    assert "3x" not in concept_terms(query, mathematics=True)
+    assert concept_terms(query, mathematics=True) == set()
+    gate = EvidenceGate(EvidenceConfig(min_rerank_score=0.0, min_query_term_overlap=0.15))
+    chunk = _chunk(
+        "power",
+        "The derivative of a polynomial is found using the power rule and the sum rule. "
+        "The derivative of x to the power n is n times x to the power n minus one.",
+        grade=11,
+        subject="mathematics",
+        rerank_score=1.2,
+    )
+    decision = gate.evaluate(
+        query,
+        [chunk],
+        scope=RetrievalFilter(grade=11, subject="mathematics"),
+    )
+    assert decision.sufficient
+    overlap = next(c for c in decision.checks if c.name == "query_term_overlap")
+    assert overlap.passed
+    assert "skipped" in overlap.detail
+
+
 def test_science_overlap_still_rejects_unrelated_topic():
     gate = EvidenceGate(EvidenceConfig(min_rerank_score=0.0, min_query_term_overlap=0.15))
     chunk = _chunk(
@@ -151,6 +177,45 @@ def test_science_overlap_still_rejects_unrelated_topic():
         scope=RetrievalFilter(grade=3, subject="science"),
     )
     assert not decision.sufficient
+
+
+def test_negative_rerank_still_keeps_best_in_scope_maths_chunk():
+    gate = EvidenceGate(EvidenceConfig(min_rerank_score=0.0, min_query_term_overlap=0.15))
+    chunk = _chunk(
+        "c11",
+        "Now, let us tackle derivatives of some standard functions. "
+        "The derivative of x to the power n is n times x to the power n minus one.",
+        grade=11,
+        subject="mathematics",
+        rerank_score=-0.625,
+    )
+    decision = gate.evaluate(
+        "d/dx (3x^2 - 4x + 3) = 6x - 4",
+        [chunk],
+        scope=RetrievalFilter(grade=12, subject="mathematics", allow_prior_grades=True),
+    )
+    assert decision.sufficient
+    assert [c.chunk_id for c in decision.kept_chunks] == ["c11"]
+    assert any("promoted" in c.detail for c in decision.checks)
+
+
+def test_class12_keeps_modest_class11_chunk_when_this_class_has_no_hit():
+    """Derivatives live in Class 11. A Class 12 student must still use that page."""
+    gate = EvidenceGate(EvidenceConfig(min_rerank_score=0.0, min_query_term_overlap=0.15))
+    prior = _chunk(
+        "c11",
+        "The derivative of x to the power n is n times x to the power n minus one.",
+        grade=11,
+        subject="mathematics",
+        rerank_score=0.075,
+    )
+    decision = gate.evaluate(
+        "d/dx (3x^2 - 4x + 3) = 6x - 4",
+        [prior],
+        scope=RetrievalFilter(grade=12, subject="mathematics", allow_prior_grades=True),
+    )
+    assert decision.sufficient
+    assert [c.chunk_id for c in decision.kept_chunks] == ["c11"]
 
 
 def test_high_scoring_prior_grade_maths_chunk_is_kept():

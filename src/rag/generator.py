@@ -307,6 +307,34 @@ class QwenGenerator:
         if error:
             raise GeneratorError(f"Generation failed: {error[0]}") from error[0]
 
+    def complete(
+        self,
+        messages: Sequence[dict[str, str]],
+        *,
+        settings: GenerationSettings | None = None,
+        image_paths: Sequence[str] = (),
+    ) -> str:
+        """Generate a full response without streaming or a token callback."""
+        self.load()
+        import torch
+
+        assert self._processor is not None and self._model is not None
+        active = settings or self.settings
+        inputs = self._prepare_inputs(messages, image_paths)
+        try:
+            with torch.inference_mode():
+                generated = self._model.generate(  # type: ignore[union-attr]
+                    **inputs,
+                    **active.to_kwargs(),
+                )
+        except Exception as exc:
+            raise GeneratorError(f"Generation failed: {exc}") from exc
+        prompt_len = inputs["input_ids"].shape[-1]
+        new_tokens = generated[0, prompt_len:]
+        return self._processor.tokenizer.decode(
+            new_tokens, skip_special_tokens=True
+        )
+
     def generate(
         self,
         messages: Sequence[dict[str, str]],

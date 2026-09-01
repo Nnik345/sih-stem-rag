@@ -44,7 +44,11 @@ from .model_memory import (
     generator_should_yield_gpu,
 )
 from .neo4j_store import Neo4jStore
-from .query_rewrite import QueryRewriter, QueryRewriteResult
+from .query_rewrite import (
+    QueryRewriter,
+    QueryRewriteResult,
+    specialize_maths_retrieval_query,
+)
 from .reranker import BGEReranker
 from .schemas import (
     CHANNEL_DENSE,
@@ -183,6 +187,17 @@ class HybridRetriever:
             image_path=image_path,
         )
         search_query = rewrite.retrieval_query
+        if (scope.subject or "").strip().lower() == "mathematics":
+            specialised = specialize_maths_retrieval_query(
+                search_query,
+                original=query,
+                transcribed=rewrite.transcribed_question,
+            )
+            if specialised != search_query:
+                diagnostics.notes.append(
+                    f"maths retrieval query specialised: {specialised!r}"
+                )
+            search_query = specialised
         diagnostics.retrieval_query = search_query
         diagnostics.rewrite_intent = rewrite.intent
         diagnostics.rewrite_fallback = rewrite.fallback
@@ -587,7 +602,11 @@ class SocraticRagPipeline:
         transcribed = retrieval.diagnostics.transcribed_question
         display_query = (query or "").strip() or transcribed or query
         tutor_question = transcribed or display_query
-        gate_query = retrieval.diagnostics.retrieval_query or tutor_question
+        # Overlap follows the student's wording (or the photo transcript), not
+        # the rewritten search string. Searching "power rule / constant rule"
+        # finds the chapter; requiring those English labels in NCERT then
+        # false-fails the gate.
+        gate_query = tutor_question or retrieval.diagnostics.retrieval_query
         decision = self.gate.evaluate(
             gate_query, retrieval.results, scope=retrieval.scope
         )
@@ -656,19 +675,32 @@ class SocraticRagPipeline:
         """
         self._release_for_generation()
         timer = Timer()
-        pieces: list[str] = []
         emit(observer, "generation_started")
         try:
-            for piece in self.generator.stream(
-                result.turn.messages,
-                settings=settings,
-                image_paths=result.image_paths,
-            ):
-                pieces.append(piece)
-                emit(observer, "generation_token", token=piece)
-                yield piece
+            if result.turn.state is TutorState.CONFIRM_ANSWER:
+                from .confirm_eval import evaluate_confirm
+
+                text = evaluate_confirm(
+                    self.generator,
+                    result.turn.messages,
+                    question=result.turn.question,
+                    subject=result.turn.scope.subject,
+                    image_paths=result.image_paths,
+                )
+                result.response_text = text
+                yield text
+            else:
+                pieces: list[str] = []
+                for piece in self.generator.stream(
+                    result.turn.messages,
+                    settings=settings,
+                    image_paths=result.image_paths,
+                ):
+                    pieces.append(piece)
+                    emit(observer, "generation_token", token=piece)
+                    yield piece
+                result.response_text = "".join(pieces)
         finally:
-            result.response_text = "".join(pieces)
             result.generation_ms = timer.stop() * 1000
             LOGGER.info(
                 "Generated %d characters in %.1f s",
@@ -737,10 +769,11 @@ class SocraticRagPipeline:
                 _finish_run(observer, result)
                 return result
 
+            confirm = result.turn.state is TutorState.CONFIRM_ANSWER
             for piece in self.stream_answer(
                 result, settings=settings, observer=observer
             ):
-                if on_token is not None:
+                if on_token is not None and not confirm:
                     on_token(piece)
             emit(
                 observer,

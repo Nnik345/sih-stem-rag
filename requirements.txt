@@ -39,6 +39,9 @@ python-multipart==0.0.20
 # --- Tests ----------------------------------------------------------------- #
 pytest==9.1.1
 
+# --- Maths confirmation (CONFIRM_ANSWER symbolic check only) --------------- #
+sympy==1.14.0
+
 # Deliberately absent: LangChain and LlamaIndex. Chunking, retrieval, graph
 # traversal, fusion, reranking and evidence gating are implemented directly so
 # each layer can be modified and benchmarked on its own.

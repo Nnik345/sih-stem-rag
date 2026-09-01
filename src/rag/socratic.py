@@ -43,49 +43,69 @@ def _state_instruction(state: TutorState, subject: str | None) -> str:
     if state is TutorState.GIVE_HINT:
         if maths:
             return (
-                "Give exactly one hint toward the next working step. Do not "
-                "finish the solution or write out the remaining steps."
+                "Give one small hint that points to the next useful rule or "
+                "working step without applying all the remaining steps. Do not "
+                "state or reveal the final answer. End with exactly one guiding "
+                "question that helps the student perform that next step."
             )
         return (
-            "Give a small hint about the concept the student needs. Do not "
-            "lecture or give a full explanation."
+            "Give one small hint that points the student toward the relevant "
+            "concept without stating the answer or giving a full explanation. "
+            "End with exactly one guiding question that helps the student reason "
+            "out the next part."
         )
     if state is TutorState.EXPLAIN_CONCEPT:
         if maths:
             return (
-                "Give the fully worked solution from the curriculum evidence, "
-                "showing each step clearly. You may write at the length needed; "
-                "the usual word cap and the rule against revealing the complete "
-                "solution do not apply in this move. Stay grounded in the evidence."
+                "Explain the mathematical concept clearly. State the relevant "
+                "formula or rule when one applies. Then demonstrate it with one "
+                "fully worked example that is similar to, but not the same as, "
+                "the student's problem: change the values, coefficients or "
+                "expression and show every necessary step. Do not solve or reveal "
+                "the final answer to the student's exact problem. Do not invent a "
+                "formula when the evidence gives only a non-formula rule."
             )
         return (
-            "Fully explain the concept from the curriculum evidence. You may "
-            "write at the length needed; the usual word cap and the rule against "
-            "revealing the complete solution do not apply in this move. Stay "
-            "grounded in the evidence."
+            "Explain the requested concept clearly and completely at the student's "
+            "grade level. Connect the main ideas in a logical order and use a short "
+            "example only when the evidence supports it. Do not turn the response "
+            "into a quiz or require the student to infer the explanation."
         )
     if state is TutorState.CONFIRM_ANSWER:
         extra = ""
         if maths:
             extra = (
-                " If they wrote 'is the derivative/differentiation of EXPR = RESULT?', "
-                "they are asking whether RESULT is the derivative of EXPR, not whether "
-                "EXPR equals RESULT as an identity."
+                " For mathematics, silently derive the expected result, simplify "
+                "both the expected result and the student's result, and compare "
+                "their mathematical meaning rather than their surface form. "
+                "Equivalent forms count as correct; omitted zero terms, reordered "
+                "terms and valid simplifications are not mistakes. In wording such "
+                "as 'is the derivative/differentiation of EXPR = RESULT?', treat "
+                "RESULT as the student's proposed derivative of EXPR."
             )
         return (
-            "The student message may include both the problem and their attempted "
-            "answer. Judge that attempt from the evidence only. If it is correct, "
-            "say so. If it is wrong, say what is off and give a hint for how to "
-            "proceed — do not dump the full solution."
+            "Output one JSON object only, no markdown and no student-facing prose. "
+            "Required shape: {\"verdict\": \"correct\" or \"incorrect\", "
+            "\"brief_reason\": \"...\", \"mistake_groups\": [{\"mistake\": \"...\", "
+            "\"hint\": \"...\"}]}. Complete the full check privately before "
+            "writing JSON. Do not expose this private checking process. If the "
+            "attempt is correct, verdict is correct, brief_reason is a concise "
+            "confirmation, and mistake_groups is an empty list. If it is "
+            "incorrect, verdict is incorrect, brief_reason explains why, and "
+            "mistake_groups has one entry per distinct mistake (group repeated "
+            "instances of the same mistake) with a hint that does not reveal the "
+            "corrected final answer or a complete replacement solution. Do not "
+            "put Correct., Not quite., or any other verdict prefix in any JSON "
+            "field."
             + extra
         )
     if state is TutorState.INSUFFICIENT_EVIDENCE:
         return (
             "State plainly that the verified curriculum material does not cover this "
             "question, so you will not guess. Offer what the curriculum does cover "
-            "nearby, and invite the student to rephrase or ask their teacher. Do not "
-            "give the numeric or algebraic answer from general knowledge while "
-            "declining."
+            "nearby only when it is genuinely relevant, and invite the student to "
+            "rephrase or ask their teacher. Do not answer any part of the question "
+            "from general knowledge while declining."
         )
     raise ValueError(f"Unknown tutor state: {state}")
 
@@ -109,6 +129,10 @@ _GROUNDING_RULES = (
     "from parametric knowledge.",
     "Do not cite URLs or invent sources. Refer to material in plain language "
     "(for example \"your unit on plants\") rather than quoting page numbers.",
+    "The student cannot see CURRICULUM EVIDENCE or the [E1], [E2], [E3] labels. "
+    "Never write phrases such as 'according to the curriculum', 'according to "
+    "the evidence' or 'the retrieved material says'. Never mention E1, passage "
+    "numbers, chunk ids or page headers. Speak as a teacher in ordinary language.",
 )
 
 _APPLY_RULE = (
@@ -116,18 +140,39 @@ _APPLY_RULE = (
     "instance, apply that rule to their expression or numbers. Do not refuse "
     "only because their exact example is not printed in the book. Do not use a "
     "rule that is not in the evidence.",
+    "A new instance does not need to appear verbatim in the evidence. You may "
+    "derive its answer by calculation or logical application of an evidenced "
+    "rule. Before making a claim, silently carry out the required reasoning and "
+    "check that the claim, calculation and conclusion agree with one another.",
     "If some evidence is from an earlier class than the student is in now, you "
     "may say it was taught in that earlier class. Do not invent text from a "
     "class that was not retrieved.",
 )
 
-# Socratic pacing: used for GIVE_HINT and CONFIRM_ANSWER, not EXPLAIN_CONCEPT.
-_GUIDED_RULES = (
-    "Never reveal the complete solution immediately. Guide the student with "
-    "questions, hints and small steps so they reach it themselves.",
-    "Ask one question at a time and wait for the student.",
-    "Keep your reply under about 180 words.",
+_CONFIRM_APPLY = (
+    "When the current tutoring move is CONFIRM_ANSWER, use the evidenced rule "
+    "to perform a complete private check before writing JSON. Compare meaning, "
+    "not merely wording or formatting. A different but equivalent expression or "
+    "scientifically equivalent statement is correct. Missing detail is not an "
+    "error unless that detail is required for the student's claim to be correct.",
+    "The JSON verdict must match that private check. Never output a provisional "
+    "verdict, student-facing prose, Correct., or Not quite. The student never "
+    "sees this JSON.",
 )
+
+# Socratic pacing applies only to GIVE_HINT. Other states define their own
+# response structure in _state_instruction.
+_GUIDED_RULES = (
+    "Give only the next useful nudge, not a sequence of hints or steps.",
+    "Ask exactly one guiding question and then wait for the student.",
+)
+
+_STATE_WORD_LIMITS: dict[TutorState, int] = {
+    TutorState.GIVE_HINT: 90,
+    TutorState.EXPLAIN_CONCEPT: 450,
+    TutorState.CONFIRM_ANSWER: 300,
+    TutorState.INSUFFICIENT_EVIDENCE: 130,
+}
 
 _SCOPE_GUIDANCE: dict[tuple[int, str], str] = {
     (1, "mathematics"): (
@@ -180,7 +225,7 @@ _SCOPE_GUIDANCE: dict[tuple[int, str], str] = {
     (6, "science"): (
         "The student is in Class 6, using NCERT Curiosity. Introduce a term from "
         "that book (components of food, grouping materials, motion, living and "
-        "non-living), then use it. Keep the chain of reasoning short and Socratic."
+        "non-living), then use it. Keep the chain of reasoning short."
     ),
     (7, "mathematics"): (
         "The student is in Class 7, using NCERT Ganita Prakash Parts I and II. "
@@ -195,24 +240,22 @@ _SCOPE_GUIDANCE: dict[tuple[int, str], str] = {
     (8, "mathematics"): (
         "The student is in Class 8, using NCERT Ganita Prakash Parts I and II. "
         "Multi-step explanations are fine if each step is named: rational numbers, "
-        "linear equations, mensuration, data handling. Keep the Socratic question "
-        "at the end."
+        "linear equations, mensuration and data handling."
     ),
     (8, "science"): (
         "The student is in Class 8, using NCERT Curiosity. Multi-step explanations "
         "are fine for force, friction, chemical effects of current, cell structure "
-        "or conservation, if each step is named and the last line is a question."
+        "or conservation, if each step is named."
     ),
     (9, "mathematics"): (
         "The student is in Class 9, using NCERT Ganita Manjari. They can follow a "
         "structured argument: number systems, polynomials, Euclid, coordinate "
-        "geometry, linear equations in two variables. Still ask one question at a "
-        "time; do not dump a full proof."
+        "geometry and linear equations in two variables."
     ),
     (9, "science"): (
         "The student is in Class 9, using NCERT Exploration. They can follow a "
         "structured argument from motion, force, atoms and molecules, tissues or "
-        "the fundamental unit of life. Still ask one question at a time."
+        "the fundamental unit of life."
     ),
     (10, "mathematics"): (
         "The student is in Class 10, using NCERT Mathematics. They can use "
@@ -229,55 +272,50 @@ _SCOPE_GUIDANCE: dict[tuple[int, str], str] = {
     (11, "mathematics"): (
         "The student is in Class 11, using NCERT Mathematics. Formal language for "
         "sets, relations, functions, trigonometry, sequences, conic sections, "
-        "limits and derivatives (introductory) is appropriate. Still do not dump "
-        "a full worked solution."
+        "limits and derivatives (introductory) is appropriate."
     ),
     (11, "physics"): (
         "The student is in Class 11, using NCERT Physics Parts I and II. Formal "
         "language for units, motion in a plane, laws of motion, work-energy, "
         "gravitation, thermodynamics, waves and oscillations is appropriate. "
-        "Stay Socratic; do not dump a full derivation."
+        "Show how quantities and principles are connected."
     ),
     (11, "chemistry"): (
         "The student is in Class 11, using NCERT Chemistry Parts I and II. Formal "
         "language for some basic concepts of chemistry, structure of atom, "
         "periodicity, chemical bonding, states of matter, thermodynamics, "
-        "equilibrium, redox and organic basics is appropriate. One idea, then a "
-        "question."
+        "equilibrium, redox and organic basics is appropriate."
     ),
     (11, "biology"): (
         "The student is in Class 11, using NCERT Biology. Formal language for the "
         "living world, biological classification, plant and animal kingdom, "
         "morphology, cell, biomolecules, cell cycle and plant physiology is "
-        "appropriate. Guide with questions; do not recite a whole chapter."
+        "appropriate. Organise processes and classifications clearly."
     ),
     (12, "mathematics"): (
         "The student is in Class 12, using NCERT Mathematics Parts I and II. They "
         "can follow relations and functions, inverse trigonometry, matrices, "
         "determinants, continuity, differentiability, applications of derivatives, "
         "integrals, differential equations, vectors and probability. Use the "
-        "book's wording (for example 'derivative', 'definite integral'). Keep the "
-        "reply Socratic and under the word limit."
+        "book's wording (for example 'derivative', 'definite integral')."
     ),
     (12, "physics"): (
         "The student is in Class 12, using NCERT Physics Parts I and II. They can "
         "follow electrostatics, current electricity, magnetism, electromagnetic "
         "induction, AC, EM waves, ray and wave optics, dual nature, atoms, nuclei "
-        "and semiconductors. Use the book's wording. Keep the reply Socratic; do "
-        "not dump a full numerical solution."
+        "and semiconductors. Use the book's wording and standard symbols."
     ),
     (12, "chemistry"): (
         "The student is in Class 12, using NCERT Chemistry Parts I and II. They "
         "can follow solutions, electrochemistry, chemical kinetics, d- and f-block, "
         "coordination compounds, haloalkanes, alcohols, aldehydes, amines and "
-        "biomolecules. Use NCERT names for reactions and compounds. One step, then "
-        "a question."
+        "biomolecules. Use NCERT names for reactions and compounds."
     ),
     (12, "biology"): (
         "The student is in Class 12, using NCERT Biology. They can follow "
         "reproduction, genetics, evolution, human health, biotechnology, organisms "
-        "and populations, ecosystem and biodiversity. Use the book's terms. Guide "
-        "with questions rather than reciting a long process."
+        "and populations, ecosystem and biodiversity. Use the book's terms and "
+        "organise multi-stage processes clearly."
     ),
 }
 
@@ -341,11 +379,16 @@ class SocraticController:
         lines = list(_GROUNDING_RULES)
         if state is not TutorState.INSUFFICIENT_EVIDENCE:
             lines.extend(_APPLY_RULE)
-        if state in (TutorState.GIVE_HINT, TutorState.CONFIRM_ANSWER):
+        if state is TutorState.CONFIRM_ANSWER:
+            lines.extend(_CONFIRM_APPLY)
+        if state is TutorState.GIVE_HINT:
             lines.extend(_GUIDED_RULES)
         guidance = scope_guidance(scope.grade, scope.subject)
         if guidance:
             lines.append(guidance)
+        lines.append(
+            f"Keep the complete response within {_STATE_WORD_LIMITS[state]} words."
+        )
         lines.append(
             f"Current tutoring move: {state.value}. "
             f"{_state_instruction(state, scope.subject)}"
@@ -353,7 +396,7 @@ class SocraticController:
         return "\n".join(f"- {line}" for line in lines)
 
     def format_evidence(self, evidence: Sequence[RetrievedChunk]) -> str:
-        """Render evidence with internal provenance labels the model can refer to."""
+        """Render evidence with internal provenance labels. The student never sees this."""
         if not evidence:
             return "(no curriculum evidence retrieved)"
         blocks = []
@@ -375,10 +418,15 @@ class SocraticController:
         evidence: Sequence[RetrievedChunk],
         *,
         state: TutorState,
+        subject: str | None = None,
         insufficient_reasons: Sequence[str] = (),
         attached_figures: Sequence[dict[str, Any]] = (),
     ) -> str:
-        parts = [f"STUDENT QUESTION\n{question}"]
+        parts = [
+            f"STUDENT QUESTION\n{question}",
+            "The [E1], [E2], … blocks below are hidden from the student. "
+            "Do not mention those labels or say according to the evidence.",
+        ]
 
         if attached_figures:
             lines = []
@@ -395,7 +443,9 @@ class SocraticController:
                 )
             parts.append(
                 "ATTACHED TEXTBOOK FIGURES (official NCERT extracts only; "
-                "do not invent any other diagram)\n" + "\n".join(lines)
+                "do not invent any other diagram). These labels are for you only; "
+                "do not say Figure 1 or quote image_id to the student.\n"
+                + "\n".join(lines)
             )
         else:
             parts.append(
@@ -418,18 +468,35 @@ class SocraticController:
                 )
             parts.append(
                 "Tell the student you do not have verified curriculum material "
-                "for this question. Do not answer from general knowledge."
+                "for this question. Do not answer from general knowledge. "
+                "Do not mention [E1] labels or that you inspected hidden evidence."
             )
         else:
             parts.append(f"CURRICULUM EVIDENCE\n{self.format_evidence(evidence)}")
             if state is TutorState.CONFIRM_ANSWER:
                 parts.append(
-                    "The student message may include both the problem and their "
-                    "attempted answer. Judge that attempt from the evidence only."
+                    "CONFIRMATION CHECK (private; output JSON only)\n"
+                    "1. Interpret the student's proposed answer.\n"
+                    "2. Work out the expected answer from the retrieved rule.\n"
+                    "3. Compare their meanings, allowing equivalent wording, "
+                    "notation and simplification.\n"
+                    "4. Lock the verdict, then emit only the JSON object.\n"
+                    "If correct: {\"verdict\":\"correct\",\"brief_reason\":\"...\","
+                    "\"mistake_groups\":[]}. "
+                    "If incorrect: include mistake_groups with mistake and hint; "
+                    "group repeated instances of the same mistake; do not reveal "
+                    "the corrected final answer. "
+                    "Do not write Correct. or Not quite. inside JSON fields."
                 )
             parts.append(
-                "Respond as the Socratic tutor, using only the evidence above."
+                "Ground your reply in the hidden curriculum material. "
+                "Never name [E1], E2, or 'the evidence' to the student."
             )
+        parts.append(
+            "FINAL RESPONSE REQUIREMENTS\n"
+            f"{_state_instruction(state, subject)} "
+            f"Keep the complete response within {_STATE_WORD_LIMITS[state]} words."
+        )
         return "\n\n".join(parts)
 
     # -- turn construction ------------------------------------------------- #
@@ -472,6 +539,7 @@ class SocraticController:
                 question,
                 evidence,
                 state=state,
+                subject=scope.subject,
                 insufficient_reasons=decision.reasons,
                 attached_figures=attached_figures,
             ),

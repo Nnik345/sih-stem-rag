@@ -68,17 +68,39 @@ def content_terms(text: str) -> set[str]:
 
 
 def concept_terms(text: str, *, mathematics: bool = False) -> set[str]:
-    """Content words, optionally dropping algebraic instance tokens for maths."""
+    """Content words, optionally dropping algebraic instance tokens for maths.
+
+    When every leftover token is an instance (``3x``, ``6x``, ``plus``), return
+    an empty set. Callers must not fall back to the instance tokens: that would
+    demand the student's exact polynomial appear in NCERT.
+    """
     terms = content_terms(text)
     if not mathematics:
         return terms
-    cleaned = {
+    return {
         token
         for token in terms
         if token not in _ALGEBRA_OPERATOR_WORDS
         and _INSTANCE_TOKEN_RE.match(token) is None
     }
-    return cleaned or terms
+
+
+def has_maths_instance_token(text: str) -> bool:
+    """True when ``text`` contains digits-as-algebra (``3x``, ``6``, …)."""
+    return any(_INSTANCE_TOKEN_RE.match(token) for token in _TOKEN_RE.findall(text.lower()))
+
+
+def strip_maths_instance_text(text: str) -> str:
+    """Keep rule words; drop numbers, ``3x``-style tokens, and operator words."""
+    kept: list[str] = []
+    for token in _TOKEN_RE.findall(text or ""):
+        low = token.lower()
+        if len(low) <= 2 or low in _STOPWORDS or low in _ALGEBRA_OPERATOR_WORDS:
+            continue
+        if _INSTANCE_TOKEN_RE.match(low):
+            continue
+        kept.append(low)
+    return " ".join(kept)
 
 
 class EvidenceGate:
@@ -158,9 +180,34 @@ class EvidenceGate:
             )
         scored = safe
 
-        # 2. best reranker score clears the floor (raw logit; 0.0 ≈ P=0.5)
+        # 2–3. reranker floor, with a fallback when every on-topic page scores
+        # below 0 (common on NCERT maths, where the book does not use names
+        # like "power rule").
         top_score = max(c.rerank_score for c in scored)  # type: ignore[type-var]
-        score_ok = top_score >= self.config.min_rerank_score
+        strong = [
+            c
+            for c in scored
+            if (c.rerank_score or float("-inf")) >= self.config.min_rerank_score
+        ]
+        promoted_best = False
+        if not strong:
+            scoped_for_best = [
+                c
+                for c in scored
+                if (scope.grade is None and scope.subject is None)
+                or self._matches_scope(c, scope)
+            ]
+            pool = scoped_for_best or list(scored)
+            if pool:
+                best = max(
+                    pool,
+                    key=lambda c: c.rerank_score
+                    if c.rerank_score is not None
+                    else float("-inf"),
+                )
+                strong = [best]
+                promoted_best = True
+        score_ok = top_score >= self.config.min_rerank_score or promoted_best
         checks.append(
             EvidenceCheck(
                 name="reranker_confidence",
@@ -168,6 +215,7 @@ class EvidenceGate:
                 detail=(
                     f"best reranker score {top_score:.3f} vs floor "
                     f"{self.config.min_rerank_score:.3f}"
+                    + ("; accepted best in-scope chunk below floor" if promoted_best else "")
                 ),
                 value=round(float(top_score), 4),
             )
@@ -178,20 +226,22 @@ class EvidenceGate:
                 f"relevance floor of {self.config.min_rerank_score:.2f}."
             )
 
-        # 3. enough independently relevant chunks
-        strong = [
-            c
-            for c in scored
-            if (c.rerank_score or float("-inf")) >= self.config.min_rerank_score
-        ]
         enough_strong = len(strong) >= self.config.min_strong_chunks
         checks.append(
             EvidenceCheck(
                 name="mutually_relevant_chunks",
                 passed=enough_strong,
                 detail=(
-                    f"{len(strong)} chunk(s) at or above the floor; "
-                    f"{self.config.min_strong_chunks} required"
+                    (
+                        f"promoted best in-scope chunk at score "
+                        f"{(strong[0].rerank_score or 0):.3f}; none met the floor "
+                        f"{self.config.min_rerank_score:.3f}"
+                    )
+                    if promoted_best and strong
+                    else (
+                        f"{len(strong)} chunk(s) at or above the floor; "
+                        f"{self.config.min_strong_chunks} required"
+                    )
                 ),
                 value=len(strong),
             )
@@ -208,12 +258,21 @@ class EvidenceGate:
         if self.config.require_scope_match and (
             scope.grade is not None or scope.subject is not None
         ):
+            scoped = [c for c in kept if self._matches_scope(c, scope)]
+            current_hits = [c for c in scoped if not self._is_prior_grade(c, scope)]
             in_scope: list[RetrievedChunk] = []
-            for chunk in kept:
-                if not self._matches_scope(chunk, scope):
-                    continue
-                if self._is_prior_grade(chunk, scope):
-                    score = chunk.rerank_score if chunk.rerank_score is not None else float("-inf")
+            for chunk in scoped:
+                # The extra prior-grade floor is only to drop weak older
+                # near-misses when this class already has a hit. If the topic
+                # lives in an earlier class (Class 11 derivatives for a Class 12
+                # student), that earlier page is the evidence — do not discard it
+                # because bge-reranker logits sit near 0, not 1.
+                if self._is_prior_grade(chunk, scope) and current_hits:
+                    score = (
+                        chunk.rerank_score
+                        if chunk.rerank_score is not None
+                        else float("-inf")
+                    )
                     if score < self.config.min_prior_grade_rerank_score:
                         continue
                 in_scope.append(chunk)
@@ -247,22 +306,38 @@ class EvidenceGate:
         # 5. the evidence text shares content words with the question
         maths = (scope.subject or "").strip().lower() == "mathematics"
         query_terms = concept_terms(query, mathematics=maths)
-        if query_terms and kept:
+        if maths and not query_terms:
+            # Instance-only maths (a specific polynomial, a numeric sum). The
+            # reranker and scope checks already judged the passages; do not
+            # require the book's example to use the same coefficients.
+            overlap = 1.0
+            overlap_ok = True
+            overlap_detail = (
+                "maths instance query has no remaining concept terms; "
+                "overlap check skipped"
+            )
+        elif query_terms and kept:
             evidence_terms = concept_terms(
                 " ".join(c.text for c in kept), mathematics=maths
             )
             overlap = len(query_terms & evidence_terms) / len(query_terms)
+            overlap_ok = overlap >= self.config.min_query_term_overlap
+            overlap_detail = (
+                f"{overlap:.0%} of the question's content words appear in the "
+                f"evidence; {self.config.min_query_term_overlap:.0%} required"
+            )
         else:
             overlap = 0.0
-        overlap_ok = overlap >= self.config.min_query_term_overlap
+            overlap_ok = overlap >= self.config.min_query_term_overlap
+            overlap_detail = (
+                f"{overlap:.0%} of the question's content words appear in the "
+                f"evidence; {self.config.min_query_term_overlap:.0%} required"
+            )
         checks.append(
             EvidenceCheck(
                 name="query_term_overlap",
                 passed=overlap_ok,
-                detail=(
-                    f"{overlap:.0%} of the question's content words appear in the "
-                    f"evidence; {self.config.min_query_term_overlap:.0%} required"
-                ),
+                detail=overlap_detail,
                 value=round(overlap, 4),
             )
         )
