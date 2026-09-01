@@ -44,10 +44,13 @@ data/evaluation/retrieval_questions.jsonl
 .ruff_cache/
 .mypy_cache/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
 
-# --- Logs (reproducible by re-running the command) ---------------------------
+# --- Logs and temporary files (reproducible by re-running the command) -------
 *.log
+*.tmp
 
 # --- Local pyenv configuration -----------------------------------------------
 .python-version
@@ -66,6 +69,7 @@ build/
 # --- Virtual environments ----------------------------------------------------
 .venv/
 venv/
+env/
 ENV/
 
 # --- Frontend (visualizer; reproducible from package-lock.json) -------------
@@ -84,9 +88,19 @@ yarn-error.log*
 # Restore: unpack an official Node.js LTS tarball here; do not install Node system-wide
 .tools/
 
+# --- Presentation working files ----------------------------------------------
+# Local PPT diagrams and generated slide media. Not a blanket assets/ ignore.
+# Restore: not required to run the tutor; regenerate locally if needed.
+.ppt-assets/
+.~lock.*
+~$*
+
 # --- Editor / OS -------------------------------------------------------------
 .DS_Store
+Thumbs.db
+Desktop.ini
 *.swp
 *.swo
+*~
 .idea/
 .vscode/

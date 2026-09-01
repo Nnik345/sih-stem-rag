@@ -292,6 +292,7 @@ or use the table below to restore individual pieces.
 | `frontend/dist/` | `cd frontend && npm run build` | small |
 | `frontend/.vite/`, `frontend/.pytest_cache/`, `frontend/coverage/` | recreated by Vite / accidental pytest in `frontend/` | negligible |
 | `.tools/` | optional local Node.js LTS archive if system Node is unavailable | ~50 MB |
+| `.ppt-assets/` | local PowerPoint working diagrams; not required to run the tutor | — |
 
 **Still committed:** source code, `scripts/`, `tests/`, `frontend/` (except
 `node_modules/` and `dist/`), `.env.example`,
@@ -322,6 +323,8 @@ Approved STEM sources (PDF/ePUB)
         |
    Qwen3-VL-2B query rewrite   (text and optional student photo; then unloaded)
         |
+   Mathematics query specialisation (d/dx / derivative cues, when subject is maths)
+        |
    SigLIP image kNN            (if a photo was uploaded; then unloaded)
         |
    Retrieval channels
@@ -334,11 +337,13 @@ Approved STEM sources (PDF/ePUB)
         |
    BGE-reranker-v2-m3
         |
+   Grade-aware final evidence
+        |
    Evidence sufficiency gate
         |
-   Qwen3-VL-8B-Instruct
+   Qwen3-VL-8B-Instruct        (buffered structured JSON, then Python format)
         |
-   Socratic tutoring response  (streamed)
+   Validated Socratic tutoring response
 ```
 
 Every layer is implemented directly. **LangChain and LlamaIndex are deliberately
@@ -452,17 +457,34 @@ With a photo it also classifies `input_kind` (`math_problem`, `diagram`, or
 question and does not infer grade or subject. Check-my-work questions (for example “is the
 differentiation of x² + 3x = 2x + 3?”) are labelled `verify`: retrieval targets
 the topic / curriculum rule, not the student’s proposed answer or their specific
-polynomial, and does not treat both sides as things to differentiate. For a
-check-my-work item such as “is the differentiation of x² + 3x = 2x + 3?”, the
-retrieval query names the power rule and sum rule rather than the expression
-itself. The rewritten text is used for dense, lexical, rerank and the
-evidence-gate overlap check; the original question stays in the Socratic user
-prompt. Intent is diagnostic only and does not pick the tutoring state.
+polynomial, and does not treat both sides as things to differentiate.
+After rewrite, mathematics queries are specialised in
+`specialize_maths_retrieval_query`: cues such as `d/dx`, `dy/dx`, `derivative`,
+`differentiate`, and `differentiation` (including on the original question or
+photo transcript) are normalised to NCERT-like differentiation-rule search
+terms rather than quadratic roots or polynomial zeroes. Cues on the student’s
+original wording override a rewriter that drifted into “quadratic equations and
+roots”. For example:
+
+```text
+provide a solution for d/dx 3x^2 - 4x + 3
+```
+
+Retrieval searches for the applicable derivative rules, not a request to solve
+a quadratic equation. The specialised search
+string is used for dense, lexical, and rerank retrieval. The evidence-gate
+overlap check uses the student’s wording (or the photo transcript), not that
+search string. The original question stays in the Socratic user prompt. Intent
+is diagnostic only and does not pick the tutoring state.
 
 Mathematics and science/PCB retrieval treat the selected class as **where the
-student is now**. The same subject lineage may also contribute **high-scoring**
-chunks from earlier classes (physics/chemistry/biology may use class 3–10
-science). Higher classes and the other lineage (maths ↮ science) stay closed.
+student is now**. Index scans keep the requested class and earlier classes in
+the same subject lineage (`grade <=` the requested class; physics/chemistry/biology
+may use class 3–10 science). Material above the requested class is not
+retrieved. After reranking, final evidence prefers the requested class, then
+closer earlier classes when relevance is comparable; topic relevance still
+outranks grade proximity (see [Grade-aware final evidence](#grade-aware-final-evidence)).
+The other lineage (maths ↮ science) stays closed.
 
 ### Generator
 
@@ -472,7 +494,9 @@ VRAM and physical RAM at load time: generation headroom stays on the GPU
 (vision prefill + KV cache), leftover layers go to system RAM (up to
 `GENERATOR_CPU_RAM_FRACTION` of RAM, default 80%). A 32 GiB card can run the 8B
 tutor fully on GPU. A 12 GiB or 8 GiB card offloads more layers and generation
-is slower. Streaming is used by `scripts/test_rag.py` and the dashboard.
+is slower. Tutoring replies are generated with buffered, non-streamed
+`generator.complete()` (`do_sample=False`), then parsed and formatted in
+Python before `scripts/test_rag.py` or the dashboard shows the student text.
 
 The dashboard releases BGE / reranker / SigLIP before the tutor loads. On small
 GPUs the tutor is also unloaded before the next retrieval so the 2B rewriter
@@ -518,7 +542,7 @@ released:
 ingest: load BGE-M3 -> embed -> release BGE-M3
 query : load Qwen3-VL-2B rewriter -> rewrite -> release rewriter
         load BGE-M3 -> dense retrieval -> (reranker) -> release embedder/reranker
-        load Qwen3-VL-8B (weights split from live VRAM + RAM) -> stream response
+        load Qwen3-VL-8B (weights split from live VRAM + RAM) -> buffered structured reply
 ```
 
 No quantization is used anywhere. On a small GPU the 8B tutor is unloaded before
@@ -778,7 +802,29 @@ contributions retained.
 ### 6. Reranking
 
 The top `fusion_top_k` (default 20) fused candidates are scored by
-BGE-reranker-v2-m3 and the best `final_top_k` (default 5) are returned.
+BGE-reranker-v2-m3. Reranker logits are kept on every candidate; the final
+evidence list is not “top 5 rerank scores” alone.
+
+### 7. Grade-aware final evidence
+
+`select_final_evidence` in `src/rag/fusion.py` then chooses up to
+`final_top_k` (default 5) chunks. Retrieval already restricts the index scan to
+the requested class and earlier classes (`grade <=` requested). Final selection
+then:
+
+- Gives the **requested grade** the highest priority among comparably relevant
+  chunks.
+- Keeps **earlier grades** available for prerequisite material.
+- Prefers a **closer earlier grade** over a more distant one when relevance is
+  comparable. For Class 12 that order is Class 12, then Class 11, then Class 10,
+  and so on.
+- Treats **topic relevance as more important than grade proximity**. An
+  off-topic chunk from the requested class does not displace a clearly more
+  relevant earlier-class passage.
+- **Drops material above the student’s requested grade.**
+
+Diagnostics record `grade proximity (requested class …; closer grades preferred
+among comparable relevance)`.
 
 ### Preserved diagnostics
 
@@ -825,13 +871,52 @@ formats retrieved evidence with its provenance, and supports tutoring states:
 interface takes a conversation history so it does not assume one-shot answers.
 
 The generator is instructed to treat retrieved curriculum as the factual basis
-and not to fabricate curriculum facts. `GIVE_HINT` stays Socratic (no complete
-solution, about 180 words). `CONFIRM_ANSWER` marks the attempt: if it is right,
-say so and stop; if it is wrong, one hint, no quiz. `EXPLAIN_CONCEPT` is the
-exception: science gets a full concept explanation and mathematics gets a fully
-worked solution, still grounded in evidence. Source metadata (document, page,
-unit, chunk) is preserved internally so citations can be surfaced later; no URLs
-are fabricated.
+and not to fabricate curriculum facts. Source metadata (document, page, unit,
+chunk) is preserved internally so citations can be surfaced later; no URLs are
+fabricated. The student never sees evidence labels such as `[E1]`.
+
+### Tutoring states
+
+Word limits are enforced on the formatted student-facing reply
+(`src/rag/socratic.py`, `_STATE_WORD_LIMITS`):
+
+| State | Word limit | Behaviour |
+|-------|------------|-----------|
+| `GIVE_HINT` | 90 | One small hint toward the next useful rule or step, then exactly one guiding question. Does not reveal the answer or give a full solution. |
+| `EXPLAIN_CONCEPT` | 450 | Explains the concept from the evidence. For mathematics, states the relevant formula or rule when one applies, then a fully worked example that is similar but **not** the student’s exact problem (different values or expression). Does not solve the student’s instance. For science, a formula or example is optional when the evidence supports it. |
+| `CONFIRM_ANSWER` | 300 | Checks the student’s attempt. Algebraically or scientifically equivalent answers count as correct. If correct: a brief confirmation prefixed `Correct.` If incorrect: `Not quite.`, then mistakes grouped with a corrective hint each, without revealing the corrected final answer or a replacement solution. |
+| `INSUFFICIENT_EVIDENCE` | 130 | Chosen automatically when the evidence gate fails (not a `--state` value). Declines: verified curriculum evidence is insufficient. Does not answer from general knowledge. |
+
+### Buffered structured generation
+
+Every tutoring state uses the same generation path
+(`src/rag/structured_tutor.py`, `src/rag/tutor_json.py`; `CONFIRM_ANSWER` via
+`src/rag/confirm_eval.py`):
+
+- Buffered, non-streamed `generator.complete()` (not token streaming).
+- Deterministic settings: `do_sample=False` and a per-state token cap.
+- State-specific structured JSON from the model.
+- Parse and validate that JSON before any reply reaches the student.
+- Exactly one JSON-repair retry after invalid output.
+- A safe, state-specific fallback if generation still fails.
+- Deterministic Python formatting of the validated fields into student text.
+
+The student is not shown raw evaluator JSON, private checking text, provisional
+verdicts, or evidence labels. Structural validation checks shape, leaks, word
+limits, and similar constraints; **it does not guarantee that every scientific
+or mathematical claim is factually correct.**
+
+### Mathematical verification
+
+For mathematics `CONFIRM_ANSWER` turns, a question that is safely parseable as
+“is the derivative/differentiation of EXPR equal to RESULT?” may be checked with
+SymPy (`sympy` in `requirements.txt`) before the reply is formatted.
+
+- Algebraically equivalent expressions are accepted.
+- Omitted zero terms and reordered equivalent terms are accepted.
+- Unsupported, unsafe, or multi-variable expressions are not forced through
+  SymPy; the tutor falls back to evidence-grounded model evaluation.
+- SymPy is not used for non-mathematical subjects.
 
 ## Commands
 
@@ -952,9 +1037,10 @@ python scripts/test_rag.py --image path/to/photo.jpg --grade 9 --subject science
 ```
 
 Runs filtering, rewrite (with optional photo classify/transcribe), image kNN when
-a photo is given, fusion, reranking and the evidence gate, prints concise
-diagnostics, and only then streams the Socratic response from Qwen3-VL with the
-student photo when one was uploaded. Textbook figures are not shown in the
+a photo is given, fusion, reranking, grade-aware evidence selection and the
+evidence gate, prints concise diagnostics, then loads Qwen3-VL-8B and prints the
+validated Socratic reply (buffered structured generation, not token-by-token
+streaming). Textbook figures are not shown in the
 answer. If the gate reports insufficient
 evidence, the generator is either asked to decline (`--strict` off) or not loaded
 at all (`--strict` on).
@@ -974,20 +1060,21 @@ required.
 | `--state` | `GIVE_HINT` | Tutoring move (see table below) |
 | `--retrieval-only` | off | Stop after the evidence gate; never load the generator |
 | `--strict` | off | On insufficient evidence, skip generation entirely |
-| `--max-new-tokens` | from config (`640`) | Cap streamed answer length for this run |
+| `--max-new-tokens` | from config (`640`) | Writes `GENERATOR_MAX_NEW_TOKENS` on the config object. Tutoring uses buffered `do_sample=False` generation with per-state token caps in `src/rag/tutor_json.py` |
 | `--json PATH` | — | Write the full result record (diagnostics, gate, response) to a file |
 | `--log-level` | `WARNING` | Logging verbosity |
 
 #### `--state` tutoring moves
 
 These change how the generator is prompted. They do **not** bypass the evidence
-gate. Leave `--state` blank to use `GIVE_HINT`.
+gate. Leave `--state` blank to use `GIVE_HINT`. Word limits and JSON shapes are
+described under [Socratic controller](#socratic-controller).
 
 | Value | Behaviour |
 |-------|-----------|
-| `GIVE_HINT` | Default. Maths: one hint toward the next working step; do not finish the solution. Science: a small concept hint; do not lecture. |
-| `EXPLAIN_CONCEPT` | Science: fully explain the concept from the evidence. Maths: give the fully worked solution from the evidence. Overrides the usual “never reveal the complete solution” rule and the ~180-word cap. |
-| `CONFIRM_ANSWER` | The question box may include both the problem and the student’s attempt. Mark it: if correct, say so and stop (do not quiz). If wrong, say what is off and give one hint (do not dump the full solution). |
+| `GIVE_HINT` | Default. One small hint and one guiding question; do not reveal the answer (90 words). |
+| `EXPLAIN_CONCEPT` | Explain the concept. Maths: formula or rule plus a similar worked example, not the student’s exact problem (450 words). |
+| `CONFIRM_ANSWER` | The question may include the problem and the student’s attempt. Accept equivalents; confirm briefly if correct, or group mistakes with hints if not (300 words). |
 
 `INSUFFICIENT_EVIDENCE` is chosen automatically when the gate fails — it is not a
 valid `--state` value. With `--strict`, generation is skipped instead of running
@@ -1141,7 +1228,12 @@ cd frontend && npm test -- --run
 |------|-------|--------------|
 | `tests/test_chunking.py` | hierarchy, overlap, token budgets, deterministic IDs | no |
 | `tests/test_metadata.py` | ID scheme, filter → Cypher translation, concept normalisation | no |
-| `tests/test_fusion.py` | RRF arithmetic, dedup, weighting, signal preservation | no |
+| `tests/test_fusion.py` | RRF arithmetic, dedup, weighting, grade-proximity final evidence | no |
+| `tests/test_query_rewrite.py` | rewrite JSON, maths specialisation (`d/dx`), figure-need cues | no |
+| `tests/test_socratic.py` | tutoring states, word limits, prompts | no |
+| `tests/test_structured_tutor.py` | buffered JSON path for all tutor states | no |
+| `tests/test_confirm_eval.py` | CONFIRM_ANSWER formatting, SymPy equivalents, no token streaming | no |
+| `tests/test_evidence.py` | gate checks, maths instance overlap | no |
 | `tests/test_trace.py` | trace models, observer events, fusion/rerank/evidence/prompt | no |
 | `tests/test_graph_trace.py` | ignored-node reason codes, diagnostic classification | no |
 | `tests/test_visualizer_api.py` | FastAPI health, runs, SSE (fake pipeline) | no |
@@ -1183,11 +1275,14 @@ sih-stem-rag/
 │       ├── dense_retriever.py  vector channel
 │       ├── lexical_retriever.py full-text channel
 │       ├── graph_retriever.py  bounded graph expansion
-│       ├── fusion.py           weighted RRF
+│       ├── fusion.py           weighted RRF + grade-aware final evidence
 │       ├── evidence.py         evidence sufficiency gate
 │       ├── query_rewrite.py    Qwen3-VL-2B retrieval query rewriter
 │       ├── socratic.py         tutoring controller and prompts
-│       ├── generator.py        Qwen3-VL-8B wrapper with streaming
+│       ├── tutor_json.py       buffered JSON parse, repair, leak checks
+│       ├── structured_tutor.py structured generation for all tutor states
+│       ├── confirm_eval.py     CONFIRM_ANSWER JSON + optional SymPy check
+│       ├── generator.py        Qwen3-VL-8B wrapper (stream helper + buffered complete)
 │       ├── model_memory.py     adaptive GPU/RAM weight placement
 │       ├── pipeline.py         HybridRetriever + SocraticRagPipeline
 │       ├── trace.py            optional run/stage trace models
